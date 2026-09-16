@@ -5,10 +5,12 @@ import (
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend/app"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+
+	"local-ecs-app/pkg/app/handler"
 )
 
 func main() {
-	if err := app.Manage("local-ecs-app", NewApp, app.ManageOpts{}); err != nil {
+	if err := app.Manage("local-ecs-app", handler.NewApp, app.ManageOpts{}); err != nil {
 		log.DefaultLogger.Error(err.Error())
 		os.Exit(1)
 	}

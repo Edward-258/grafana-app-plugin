@@ -1,4 +1,4 @@
-package main
+package model
 
 import (
 	"encoding/json"
@@ -32,17 +32,17 @@ func TestPublicAssetOmitsIPs(t *testing.T) {
 	}
 }
 
-func TestIpFromIdentity(t *testing.T) {
-	if got := ipFromIdentity("10.1.2.3:9100"); got != "10.1.2.3" {
+func TestIPFromIdentity(t *testing.T) {
+	if got := IPFromIdentity("10.1.2.3:9100"); got != "10.1.2.3" {
 		t.Fatalf("got %q", got)
 	}
-	if got := ipFromIdentity("web-1:9100"); got != "" {
+	if got := IPFromIdentity("web-1:9100"); got != "" {
 		t.Fatalf("hostname should not be IP, got %q", got)
 	}
-	if got := monitorName(promIdentity{Instance: "10.1.2.3:9100", NodeName: "web-1"}); got != "web-1" {
-		t.Fatalf("monitorName=%q", got)
+	if got := MonitorName(Identity{Instance: "10.1.2.3:9100", NodeName: "web-1"}); got != "web-1" {
+		t.Fatalf("MonitorName=%q", got)
 	}
-	if got := monitorName(promIdentity{Instance: "10.1.2.3:9100"}); got != "" {
-		t.Fatalf("must not surface IP as monitorName, got %q", got)
+	if got := MonitorName(Identity{Instance: "10.1.2.3:9100"}); got != "" {
+		t.Fatalf("must not surface IP as MonitorName, got %q", got)
 	}
 }

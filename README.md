@@ -6,6 +6,8 @@ Prometheus 继续管占用率，并告诉插件「这张 dashboard 对应哪台�
 
 插件 ID：`local-ecs-app`（未签名，开发环境需允许 unsigned）。
 
+后端单向依赖：`pkg/main.go` → `app/handler` → `app/service` → `aliyun/client` → `aliyun/model` 与 `aliyun/rpc`。上层只 import 下一层。
+
 ## 怎么走数据
 
 ```
