@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { PluginPage, getBackendSrv } from '@grafana/runtime';
-import { Alert, FilterInput, LinkButton, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
+import { Alert, FilterInput, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
+import ConfigPage from './ConfigPage';
 import { EcsAsset, EcsFields } from './EcsInfo';
 import { identitiesFromPrometheus, loadSettings } from './prom';
 
@@ -12,8 +13,19 @@ type ListResponse = {
   error?: string;
 };
 
-export default function App() {
+type AppProps = {
+  query?: Record<string, unknown>;
+};
+
+function tabFromQuery(query?: Record<string, unknown>): 'config' | 'assets' {
+  const raw = query?.tab;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value === 'assets' ? 'assets' : 'config';
+}
+
+export default function App({ query }: AppProps) {
   const styles = useStyles2(getStyles);
+  const tab = tabFromQuery(query);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [instances, setInstances] = useState<EcsAsset[]>([]);
@@ -21,11 +33,16 @@ export default function App() {
   const [selected, setSelected] = useState<EcsAsset | null>(null);
 
   useEffect(() => {
+    if (tab !== 'assets') {
+      return;
+    }
+    setLoading(true);
+    setError(null);
     (async () => {
       try {
         const settings = await loadSettings();
         if (!settings.prometheusUid) {
-          throw new Error('请先在配置页选择 Prometheus 数据源');
+          throw new Error('请先在「配置」页选择 Prometheus 数据源并保存');
         }
         const identities = await identitiesFromPrometheus(settings.prometheusUid, settings.instanceLabel);
         if (identities.length === 0) {
@@ -42,7 +59,7 @@ export default function App() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [tab]);
 
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -55,57 +72,72 @@ export default function App() {
   }, [instances, filter]);
 
   return (
-    <PluginPage>
-      <div className={styles.toolbar}>
-        <FilterInput placeholder="搜索 ECS ID / 名称 / 规格" value={filter} onChange={setFilter} />
-        <LinkButton variant="secondary" href={`/plugins/${pluginJson.id}`}>
-          配置
-        </LinkButton>
-      </div>
+    <PluginPage
+      pageNav={{
+        text: 'ECS 资产',
+        url: `/a/${pluginJson.id}`,
+        children: [
+          { text: '配置', url: `/a/${pluginJson.id}?tab=config`, active: tab === 'config', icon: 'cog' },
+          { text: '资产列表', url: `/a/${pluginJson.id}?tab=assets`, active: tab === 'assets', icon: 'cloud' },
+        ],
+      }}
+    >
+      {tab === 'config' && <ConfigPage />}
 
-      {loading && <LoadingPlaceholder text="正在从 Prometheus 对齐 ECS..." />}
-      {error && (
-        <Alert title="无法读取资产" severity="error">
-          {error}
-        </Alert>
-      )}
-      {!loading && !error && instances.length === 0 && (
-        <Alert title="Prometheus 里没有可对齐的实例" severity="info">
-          确认数据源有 `up` 或 `node_uname_info`，并在配置页选对 Prometheus。
-        </Alert>
-      )}
+      {tab === 'assets' && (
+        <>
+          <div className={styles.toolbar}>
+            <FilterInput placeholder="搜索 ECS ID / 名称 / 规格" value={filter} onChange={setFilter} />
+          </div>
 
-      {!loading && rows.length > 0 && (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>监控标识</th>
-              <th>ECS ID</th>
-              <th>名称</th>
-              <th>规格</th>
-              <th>vCPU</th>
-              <th>内存</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => (
-              <tr key={row.instanceId || row.monitorName || String(idx)} onClick={() => setSelected(row)}>
-                <td>{row.monitorName || '—'}</td>
-                <td>{row.matched === false || !row.instanceId ? '未匹配' : row.instanceId}</td>
-                <td>{row.instanceName || row.hostName || '—'}</td>
-                <td>{row.instanceType || '—'}</td>
-                <td>{row.cpu || '—'}</td>
-                <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+          {loading && <LoadingPlaceholder text="正在从 Prometheus 对齐 ECS..." />}
+          {error && (
+            <Alert title="无法读取资产" severity="error">
+              {error}{' '}
+              <a className={styles.linkish} href={`/a/${pluginJson.id}?tab=config`}>
+                去配置
+              </a>
+            </Alert>
+          )}
+          {!loading && !error && instances.length === 0 && (
+            <Alert title="Prometheus 里没有可对齐的实例" severity="info">
+              确认数据源有 `up` 或 `node_uname_info`，并在配置页选对 Prometheus。
+            </Alert>
+          )}
 
-      {selected?.instanceId && (
-        <div className={styles.detail}>
-          <EcsFields instance={selected} />
-        </div>
+          {!loading && rows.length > 0 && (
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>监控标识</th>
+                  <th>ECS ID</th>
+                  <th>名称</th>
+                  <th>规格</th>
+                  <th>vCPU</th>
+                  <th>内存</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={row.instanceId || row.monitorName || String(idx)} onClick={() => setSelected(row)}>
+                    <td>{row.monitorName || '—'}</td>
+                    <td>{row.matched === false || !row.instanceId ? '未匹配' : row.instanceId}</td>
+                    <td>{row.instanceName || row.hostName || '—'}</td>
+                    <td>{row.instanceType || '—'}</td>
+                    <td>{row.cpu || '—'}</td>
+                    <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {selected?.instanceId && (
+            <div className={styles.detail}>
+              <EcsFields instance={selected} />
+            </div>
+          )}
+        </>
       )}
     </PluginPage>
   );
@@ -117,6 +149,13 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: theme.spacing(2),
     marginBottom: theme.spacing(2),
     maxWidth: 720,
+  }),
+  linkish: css({
+    border: 'none',
+    background: 'none',
+    color: theme.colors.text.link,
+    cursor: 'pointer',
+    padding: 0,
   }),
   table: css({
     width: '100%',

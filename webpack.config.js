@@ -48,7 +48,7 @@ module.exports = (env = {}) => {
               jsc: {
                 target: 'es2015',
                 parser: { syntax: 'typescript', tsx: true },
-                transform: { react: { runtime: 'automatic' } },
+                transform: { react: { runtime: 'classic' } },
               },
             },
           },

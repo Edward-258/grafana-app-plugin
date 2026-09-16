@@ -1,9 +1,9 @@
-import React, { ChangeEvent, useState } from 'react';
+import React, { ChangeEvent, useEffect, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { css } from '@emotion/css';
 import { AppPluginMeta, GrafanaTheme2, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { DataSourcePicker, getBackendSrv } from '@grafana/runtime';
-import { Alert, Button, Field, FieldSet, Input, SecretInput, useStyles2 } from '@grafana/ui';
+import { Alert, Button, Field, FieldSet, Input, LoadingPlaceholder, SecretInput, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
 import { queryPrometheus } from './prom';
 
@@ -14,28 +14,56 @@ export type AppSettings = {
   instanceLabel?: string;
 };
 
-type Props = PluginConfigPageProps<AppPluginMeta<AppSettings>>;
+type PluginSettings = {
+  enabled?: boolean;
+  pinned?: boolean;
+  jsonData?: AppSettings;
+  secureJsonFields?: Record<string, boolean>;
+};
 
-export default function ConfigPage({ plugin }: Props) {
+type Props = Partial<PluginConfigPageProps<AppPluginMeta<AppSettings>>>;
+
+export default function ConfigPage(_props: Props = {}) {
   const styles = useStyles2(getStyles);
-  const { enabled, pinned, jsonData, secureJsonFields } = plugin.meta;
-  const [region, setRegion] = useState(jsonData?.region || 'cn-hangzhou');
-  const [accessKeyId, setAccessKeyId] = useState(jsonData?.accessKeyId || '');
+  const [ready, setReady] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [pinned, setPinned] = useState(true);
+  const [region, setRegion] = useState('cn-hangzhou');
+  const [accessKeyId, setAccessKeyId] = useState('');
   const [accessKeySecret, setAccessKeySecret] = useState('');
-  const [secretConfigured, setSecretConfigured] = useState(Boolean(secureJsonFields?.accessKeySecret));
-  const [prometheusUid, setPrometheusUid] = useState(jsonData?.prometheusUid || '');
-  const [instanceLabel, setInstanceLabel] = useState(jsonData?.instanceLabel || 'instance');
+  const [secretConfigured, setSecretConfigured] = useState(false);
+  const [prometheusUid, setPrometheusUid] = useState('');
+  const [instanceLabel, setInstanceLabel] = useState('instance');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await getBackendSrv().get<PluginSettings>(`/api/plugins/${pluginJson.id}/settings`);
+        setEnabled(settings.enabled ?? true);
+        setPinned(settings.pinned ?? true);
+        setRegion(settings.jsonData?.region || 'cn-hangzhou');
+        setAccessKeyId(settings.jsonData?.accessKeyId || '');
+        setPrometheusUid(settings.jsonData?.prometheusUid || '');
+        setInstanceLabel(settings.jsonData?.instanceLabel || 'instance');
+        setSecretConfigured(Boolean(settings.secureJsonFields?.accessKeySecret));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '读取配置失败');
+      } finally {
+        setReady(true);
+      }
+    })();
+  }, []);
 
   const onSave = async () => {
     setSaving(true);
     setError(null);
     setMessage(null);
     try {
-      await updatePlugin(plugin.meta.id, {
+      await updatePlugin(pluginJson.id, {
         enabled,
         pinned,
         jsonData: {
@@ -87,6 +115,10 @@ export default function ConfigPage({ plugin }: Props) {
     }
   };
 
+  if (!ready) {
+    return <LoadingPlaceholder text="读取配置..." />;
+  }
+
   return (
     <form
       onSubmit={(e) => {
@@ -110,7 +142,7 @@ export default function ConfigPage({ plugin }: Props) {
         </Field>
         <Field
           label="实例 label"
-          description="默认 instance。与 Node Overview 上的变量名一致即可，例如 instance / node / nodename。"
+          description="默认 instance。与 Node Exporter Full 上的 Instance 变量一致即可。"
           className={styles.gap}
         >
           <Input width={60} value={instanceLabel} onChange={(e: ChangeEvent<HTMLInputElement>) => setInstanceLabel(e.target.value)} />
