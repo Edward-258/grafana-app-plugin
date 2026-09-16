@@ -1,44 +1,44 @@
 # ECS 资产 · Grafana App Plugin
 
-在现有 Node Overview 上补两件事：**ECS ID** 和 **规格（几核几 G）**。Prometheus 继续管利用率，本插件只读阿里云 ECS。
+在已有 Prometheus + Grafana CPU/内存看板旁补两件事：**ECS ID** 和 **规格（几核几 G）**。
+
+Prometheus 继续管占用率，并告诉插件「这张 dashboard 对应哪台被监控机器」。插件拿到对齐结果后，在后端用 ECS 地址查阿里云，**前端不展示内网/公网 IP**。
 
 插件 ID：`local-ecs-app`（未签名，开发环境需允许 unsigned）。
 
-## 目录（刻意比官方模板少）
-
-官方 `@grafana/create-plugin` 会带上 `.config/`、`.github/`、Jest、Playwright、ESLint、四页示例、Mage、CI。Grafana 真正加载插件只需要 `plugin.json` + `module.js` + 后端二进制。本仓库只留需求用得到的文件：
+## 怎么走数据
 
 ```
-src/plugin.json          Grafana 元数据（必填）
-src/module.tsx           前端入口：总览页 + 配置页 + 面板菜单
-src/App.tsx              侧边栏「ECS 资产」总览表
-src/ConfigPage.tsx       AccessKey / Region
-src/EcsInfo.tsx          面板菜单弹窗：当前设备 ID + 规格
-src/img/logo.svg
-pkg/*.go                 Go 后端，调 DescribeInstances
-webpack.config.js        最小 AMD 打包（无 .config）
-docker-compose.yaml      本地 Grafana
-provisioning/plugins/    自动启用 App
+已有 CPU dashboard（$instance 等）
+        │
+        ▼
+插件前端 → Grafana 数据源代理 → Prometheus（up / node_uname_info）
+        │   只取 instance、nodename 等监控标识
+        ▼
+插件 Go 后端（IP 只留在这里）
+        │   若标识里能解析出地址，或用主机名对上 ECS 后得到地址
+        ▼
+阿里云 DescribeInstances（按地址查）
+        │
+        ▼
+浏览器只渲染 ECS ID / 规格 / 名称
 ```
+
+scrape target **不必**填 ECS 内网或公网 IP。对齐优先用主机名（`nodename` / `instance`）。
 
 ## 怎么用
 
-1. 配置页填 Region、AccessKey ID、Secret（只要 `ecs:DescribeInstances`）。密钥进 Grafana `secureJsonData`，前端读不到明文。
-2. 左侧 Apps → **ECS 资产**：列出当前地域全部实例的 ID / 规格 / 核数 / 内存。
-3. 打开任意 Dashboard，点面板标题菜单 → **ECS 资产信息**：用当前 `instance` / `node` / `host` 等变量匹配那一台。
-
-变量匹配顺序：InstanceId → 内网 IP → hostname → instanceName。`node_exporter:9100` 这种进程名对不上 ECS，scrape target 请用内网 IP 或真实主机名。
+1. 配置页选择 Grafana 里已有的 **Prometheus 数据源**，填 Region 与只读 AccessKey（`ecs:DescribeInstances`）。
+2. 左侧 Apps → **ECS 资产**：列出 Prometheus 里出现过的机器，以及匹配到的 ECS ID / 规格。
+3. 打开现有利用率 Dashboard，面板菜单 → **ECS 资产信息**：用当前变量走 Prometheus 再查阿里云。
 
 ## 本地构建
 
 ```bash
-export PATH="$HOME/.local/go/bin:$PATH"   # 若 Go 装在用户目录
-# /mnt/e 上 npm install 很慢：在 Linux 盘装再软链
-#   mkdir -p ~/ecs-app-nm && cp package.json ~/ecs-app-nm && (cd ~/ecs-app-nm && npm install)
-#   ln -sfn ~/ecs-app-nm/node_modules ./node_modules
+export PATH="$HOME/.local/go/bin:$HOME/go/bin:$PATH"
 npm install
-npm run build          # 前端 dist/module.js + 后端 dist/gpx_ecs_linux_amd64
-docker.exe compose up  # WSL 里没有 docker 命令时用 Docker Desktop 的 docker.exe
+npm run build
+docker compose up
 ```
 
-打开 http://localhost:3000（匿名 Admin）。开发时改前端：`npm run dev`。改 `plugin.json` 后要重启 Grafana。
+打开 http://localhost:3000。改 `plugin.json` 后重启 Grafana。

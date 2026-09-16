@@ -4,10 +4,11 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { PluginPage, getBackendSrv } from '@grafana/runtime';
 import { Alert, FilterInput, LinkButton, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
-import { EcsFields, EcsInstance } from './EcsInfo';
+import { EcsAsset, EcsFields } from './EcsInfo';
+import { identitiesFromPrometheus, loadSettings } from './prom';
 
 type ListResponse = {
-  instances?: EcsInstance[];
+  instances?: EcsAsset[];
   error?: string;
 };
 
@@ -15,16 +16,32 @@ export default function App() {
   const styles = useStyles2(getStyles);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [instances, setInstances] = useState<EcsInstance[]>([]);
+  const [instances, setInstances] = useState<EcsAsset[]>([]);
   const [filter, setFilter] = useState('');
-  const [selected, setSelected] = useState<EcsInstance | null>(null);
+  const [selected, setSelected] = useState<EcsAsset | null>(null);
 
   useEffect(() => {
-    getBackendSrv()
-      .get<ListResponse>(`/api/plugins/${pluginJson.id}/resources/ecs/instances`)
-      .then((res) => setInstances(res.instances || []))
-      .catch((e: Error) => setError(e.message || '加载失败，请先在配置页填写 AccessKey'))
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const settings = await loadSettings();
+        if (!settings.prometheusUid) {
+          throw new Error('请先在配置页选择 Prometheus 数据源');
+        }
+        const identities = await identitiesFromPrometheus(settings.prometheusUid, settings.instanceLabel);
+        if (identities.length === 0) {
+          setInstances([]);
+          return;
+        }
+        const res = await getBackendSrv().post<ListResponse>(`/api/plugins/${pluginJson.id}/resources/ecs/enrich`, {
+          identities,
+        });
+        setInstances(res.instances || []);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '加载失败');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const rows = useMemo(() => {
@@ -33,31 +50,28 @@ export default function App() {
       return instances;
     }
     return instances.filter((i) =>
-      [i.instanceId, i.instanceName, i.hostName, i.instanceType, ...(i.privateIps || [])]
-        .join(' ')
-        .toLowerCase()
-        .includes(q)
+      [i.instanceId, i.instanceName, i.hostName, i.instanceType, i.monitorName].join(' ').toLowerCase().includes(q)
     );
   }, [instances, filter]);
 
   return (
     <PluginPage>
       <div className={styles.toolbar}>
-        <FilterInput placeholder="搜索 ECS ID / 名称 / IP" value={filter} onChange={setFilter} />
+        <FilterInput placeholder="搜索 ECS ID / 名称 / 规格" value={filter} onChange={setFilter} />
         <LinkButton variant="secondary" href={`/plugins/${pluginJson.id}`}>
-          配置 AccessKey
+          配置
         </LinkButton>
       </div>
 
-      {loading && <LoadingPlaceholder text="正在拉取 ECS 列表..." />}
+      {loading && <LoadingPlaceholder text="正在从 Prometheus 对齐 ECS..." />}
       {error && (
-        <Alert title="无法读取 ECS" severity="error">
+        <Alert title="无法读取资产" severity="error">
           {error}
         </Alert>
       )}
       {!loading && !error && instances.length === 0 && (
-        <Alert title="当前地域没有实例" severity="info">
-          检查配置页的 Region 与 AccessKey 是否属于这个账号。
+        <Alert title="Prometheus 里没有可对齐的实例" severity="info">
+          确认数据源有 `up` 或 `node_uname_info`，并在配置页选对 Prometheus。
         </Alert>
       )}
 
@@ -65,30 +79,30 @@ export default function App() {
         <table className={styles.table}>
           <thead>
             <tr>
+              <th>监控标识</th>
               <th>ECS ID</th>
               <th>名称</th>
               <th>规格</th>
               <th>vCPU</th>
               <th>内存</th>
-              <th>内网 IP</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.instanceId} onClick={() => setSelected(row)}>
-                <td>{row.instanceId}</td>
-                <td>{row.instanceName || row.hostName}</td>
-                <td>{row.instanceType}</td>
-                <td>{row.cpu}</td>
-                <td>{row.memoryGiB} GiB</td>
-                <td>{(row.privateIps || []).join(', ')}</td>
+            {rows.map((row, idx) => (
+              <tr key={row.instanceId || row.monitorName || String(idx)} onClick={() => setSelected(row)}>
+                <td>{row.monitorName || '—'}</td>
+                <td>{row.matched === false || !row.instanceId ? '未匹配' : row.instanceId}</td>
+                <td>{row.instanceName || row.hostName || '—'}</td>
+                <td>{row.instanceType || '—'}</td>
+                <td>{row.cpu || '—'}</td>
+                <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
 
-      {selected && (
+      {selected?.instanceId && (
         <div className={styles.detail}>
           <EcsFields instance={selected} />
         </div>

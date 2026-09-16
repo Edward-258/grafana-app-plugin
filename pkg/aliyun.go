@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -25,22 +26,49 @@ type Config struct {
 	AccessKeySecret string
 }
 
+// Instance is backend-only. IP fields never go to the browser.
 type Instance struct {
-	InstanceID   string   `json:"instanceId"`
-	InstanceName string   `json:"instanceName"`
-	HostName     string   `json:"hostName"`
-	InstanceType string   `json:"instanceType"`
-	CPU          int      `json:"cpu"`
-	MemoryGiB    int      `json:"memoryGiB"`
-	PrivateIPs   []string `json:"privateIps"`
-	ZoneID       string   `json:"zoneId"`
-	RegionID     string   `json:"regionId"`
+	InstanceID   string
+	InstanceName string
+	HostName     string
+	InstanceType string
+	CPU          int
+	MemoryGiB    int
+	PrivateIPs   []string
+	PublicIPs    []string
+	ZoneID       string
+	RegionID     string
+}
+
+// PublicAsset is the payload returned to the plugin UI. No addresses.
+type PublicAsset struct {
+	InstanceID   string `json:"instanceId"`
+	InstanceName string `json:"instanceName"`
+	HostName     string `json:"hostName"`
+	InstanceType string `json:"instanceType"`
+	CPU          int    `json:"cpu"`
+	MemoryGiB    int    `json:"memoryGiB"`
+	ZoneID       string `json:"zoneId,omitempty"`
+	RegionID     string `json:"regionId,omitempty"`
+}
+
+func (i Instance) Public() PublicAsset {
+	return PublicAsset{
+		InstanceID:   i.InstanceID,
+		InstanceName: i.InstanceName,
+		HostName:     i.HostName,
+		InstanceType: i.InstanceType,
+		CPU:          i.CPU,
+		MemoryGiB:    i.MemoryGiB,
+		ZoneID:       i.ZoneID,
+		RegionID:     i.RegionID,
+	}
 }
 
 type ecsClient struct {
-	cfg    Config
-	http   *http.Client
-	host   string
+	cfg  Config
+	http *http.Client
+	host string
 }
 
 func newECSClient(cfg Config) *ecsClient {
@@ -54,7 +82,7 @@ func newECSClient(cfg Config) *ecsClient {
 func (c *ecsClient) List(ctx context.Context) ([]Instance, error) {
 	var all []Instance
 	for page := 1; page <= 20; page++ {
-		batch, total, err := c.describe(ctx, page, 100)
+		batch, total, err := c.describe(ctx, page, 100, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +94,29 @@ func (c *ecsClient) List(ctx context.Context) ([]Instance, error) {
 	return all, nil
 }
 
-func (c *ecsClient) describe(ctx context.Context, page, size int) ([]Instance, int, error) {
+func (c *ecsClient) GetByIP(ctx context.Context, ip string) (Instance, bool, error) {
+	ip = strings.TrimSpace(ip)
+	if net.ParseIP(ip) == nil {
+		return Instance{}, false, nil
+	}
+	filters := []map[string]string{
+		{"PrivateIpAddresses.1": ip},
+		{"InnerIpAddresses.1": ip},
+		{"PublicIpAddresses.1": ip},
+	}
+	for _, extra := range filters {
+		batch, _, err := c.describe(ctx, 1, 10, extra)
+		if err != nil {
+			return Instance{}, false, err
+		}
+		if len(batch) > 0 {
+			return batch[0], true, nil
+		}
+	}
+	return Instance{}, false, nil
+}
+
+func (c *ecsClient) describe(ctx context.Context, page, size int, extra map[string]string) ([]Instance, int, error) {
 	params := map[string]string{
 		"Action":           "DescribeInstances",
 		"Format":           "JSON",
@@ -79,6 +129,9 @@ func (c *ecsClient) describe(ctx context.Context, page, size int) ([]Instance, i
 		"RegionId":         c.cfg.Region,
 		"PageNumber":       strconv.Itoa(page),
 		"PageSize":         strconv.Itoa(size),
+	}
+	for k, v := range extra {
+		params[k] = v
 	}
 	params["Signature"] = signRPC("POST", params, c.cfg.AccessKeySecret)
 
@@ -130,17 +183,20 @@ type describeResponse struct {
 }
 
 type rawInstance struct {
-	InstanceId           string `json:"InstanceId"`
-	InstanceName         string `json:"InstanceName"`
-	HostName             string `json:"HostName"`
-	InstanceType         string `json:"InstanceType"`
-	Cpu                  int    `json:"Cpu"`
-	Memory               int    `json:"Memory"`
-	ZoneId               string `json:"ZoneId"`
-	RegionId             string `json:"RegionId"`
-	InnerIpAddress       ipBag  `json:"InnerIpAddress"`
-	PublicIpAddress      ipBag  `json:"PublicIpAddress"`
-	VpcAttributes        vpcBag `json:"VpcAttributes"`
+	InstanceId      string `json:"InstanceId"`
+	InstanceName    string `json:"InstanceName"`
+	HostName        string `json:"HostName"`
+	InstanceType    string `json:"InstanceType"`
+	Cpu             int    `json:"Cpu"`
+	Memory          int    `json:"Memory"`
+	ZoneId          string `json:"ZoneId"`
+	RegionId        string `json:"RegionId"`
+	InnerIpAddress  ipBag  `json:"InnerIpAddress"`
+	PublicIpAddress ipBag  `json:"PublicIpAddress"`
+	VpcAttributes   vpcBag `json:"VpcAttributes"`
+	EipAddress      struct {
+		IpAddress string `json:"IpAddress"`
+	} `json:"EipAddress"`
 }
 
 type ipBag struct {
@@ -152,7 +208,8 @@ type vpcBag struct {
 }
 
 func (r rawInstance) toInstance() Instance {
-	ips := unique(append(append([]string{}, r.VpcAttributes.PrivateIpAddress.IpAddress...), r.InnerIpAddress.IpAddress...))
+	priv := unique(append(append([]string{}, r.VpcAttributes.PrivateIpAddress.IpAddress...), r.InnerIpAddress.IpAddress...))
+	pub := unique(append(append([]string{}, r.PublicIpAddress.IpAddress...), r.EipAddress.IpAddress))
 	mem := r.Memory / 1024
 	if mem == 0 && r.Memory > 0 {
 		mem = 1
@@ -164,10 +221,37 @@ func (r rawInstance) toInstance() Instance {
 		InstanceType: r.InstanceType,
 		CPU:          r.Cpu,
 		MemoryGiB:    mem,
-		PrivateIPs:   ips,
+		PrivateIPs:   priv,
+		PublicIPs:    pub,
 		ZoneID:       r.ZoneId,
 		RegionID:     r.RegionId,
 	}
+}
+
+func identityHost(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "[") {
+		if i := strings.Index(s, "]"); i > 0 {
+			return s[1:i]
+		}
+	}
+	if i := strings.LastIndex(s, ":"); i > 0 {
+		if _, err := strconv.Atoi(s[i+1:]); err == nil {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+func ipFromIdentity(s string) string {
+	host := identityHost(s)
+	if net.ParseIP(host) == nil {
+		return ""
+	}
+	return host
 }
 
 func matchInstance(query string, list []Instance) (Instance, string, bool) {
@@ -175,41 +259,56 @@ func matchInstance(query string, list []Instance) (Instance, string, bool) {
 	if q == "" {
 		return Instance{}, "", false
 	}
-	host := q
-	if i := strings.LastIndex(q, ":"); i > 0 {
-		host = q[:i]
-	}
-
-	try := func(ok bool, inst Instance, by string) (Instance, string, bool) {
-		if ok {
-			return inst, by, true
-		}
-		return Instance{}, "", false
-	}
+	host := identityHost(q)
 
 	for _, inst := range list {
 		if inst.InstanceID == q || inst.InstanceID == host {
-			return try(true, inst, "instanceId")
+			return inst, "instanceId", true
 		}
 	}
 	for _, inst := range list {
 		for _, ip := range inst.PrivateIPs {
 			if ip == host || ip == q {
-				return try(true, inst, "privateIp")
+				return inst, "privateIp", true
+			}
+		}
+		for _, ip := range inst.PublicIPs {
+			if ip == host || ip == q {
+				return inst, "publicIp", true
 			}
 		}
 	}
 	for _, inst := range list {
 		if inst.HostName != "" && (inst.HostName == host || inst.HostName == q) {
-			return try(true, inst, "hostName")
+			return inst, "hostName", true
 		}
 	}
 	for _, inst := range list {
 		if inst.InstanceName != "" && (inst.InstanceName == host || inst.InstanceName == q) {
-			return try(true, inst, "instanceName")
+			return inst, "instanceName", true
 		}
 	}
 	return Instance{}, "", false
+}
+
+func matchIdentity(ident promIdentity, list []Instance) (Instance, string, bool) {
+	for _, q := range []string{ident.Instance, ident.NodeName, ident.IP} {
+		if inst, by, ok := matchInstance(q, list); ok {
+			return inst, by, true
+		}
+	}
+	return Instance{}, "", false
+}
+
+func monitorName(ident promIdentity) string {
+	if ident.NodeName != "" && ipFromIdentity(ident.NodeName) == "" {
+		return ident.NodeName
+	}
+	host := identityHost(ident.Instance)
+	if host != "" && ipFromIdentity(host) == "" {
+		return host
+	}
+	return ""
 }
 
 func signRPC(method string, params map[string]string, secret string) string {

@@ -4,28 +4,27 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { getBackendSrv, getTemplateSrv } from '@grafana/runtime';
 import { Alert, Button, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
+import { identityForDashboard, loadSettings } from './prom';
 
-export type EcsInstance = {
+export type EcsAsset = {
   instanceId: string;
   instanceName: string;
   hostName: string;
   instanceType: string;
   cpu: number;
   memoryGiB: number;
-  privateIps: string[];
-  zoneId: string;
-  regionId: string;
+  monitorName?: string;
+  matched?: boolean;
 };
 
 type ResolveResponse = {
-  query: string;
   matched: boolean;
-  matchedBy?: string;
-  instance?: EcsInstance;
+  monitorName?: string;
+  instance?: EcsAsset;
   error?: string;
 };
 
-const VAR_NAMES = ['instanceId', 'instance_id', 'ecs_id', 'instance', 'node', 'host', 'ip'];
+const VAR_NAMES = ['instance', 'node', 'host', 'nodename', 'instanceId', 'instance_id', 'ecs_id'];
 
 export function currentDashboardQuery(): string {
   const srv = getTemplateSrv();
@@ -51,7 +50,7 @@ export function currentDashboardQuery(): string {
   return '';
 }
 
-export function EcsFields({ instance }: { instance: EcsInstance }) {
+export function EcsFields({ instance }: { instance: EcsAsset }) {
   const styles = useStyles2(getStyles);
   return (
     <dl className={styles.fields}>
@@ -66,7 +65,7 @@ export function EcsFields({ instance }: { instance: EcsInstance }) {
         </span>
       </dd>
       <dt>名称</dt>
-      <dd>{instance.instanceName || instance.hostName || '—'}</dd>
+      <dd>{instance.instanceName || instance.hostName || instance.monitorName || '—'}</dd>
     </dl>
   );
 }
@@ -83,38 +82,56 @@ export function EcsModalBody({ onDismiss }: { onDismiss?: () => void }) {
       setLoading(false);
       return;
     }
-    getBackendSrv()
-      .get<ResolveResponse>(`/api/plugins/${pluginJson.id}/resources/ecs/resolve`, { q: query })
-      .then(setData)
-      .catch((e: Error) => setError(e.message || '查询失败'))
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const settings = await loadSettings();
+        if (!settings.prometheusUid) {
+          throw new Error('请先在插件配置页选择 Prometheus 数据源');
+        }
+        const ident = await identityForDashboard(settings.prometheusUid, query, settings.instanceLabel);
+        const res = await getBackendSrv().post<ResolveResponse>(
+          `/api/plugins/${pluginJson.id}/resources/ecs/resolve`,
+          ident
+        );
+        setData(res);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '查询失败');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [query]);
 
   if (loading) {
-    return <LoadingPlaceholder text="正在匹配 ECS..." />;
+    return <LoadingPlaceholder text="正在通过 Prometheus 对齐 ECS..." />;
   }
 
   return (
     <div>
       {!query && (
         <Alert title="没有设备变量" severity="info">
-          当前 Dashboard 里找不到 instance / node / host 等变量。请用内网 IP 或主机名作为 scrape target。
+          当前 Dashboard 里找不到 instance / node / host 等变量。插件用 Prometheus 的实例标识对齐 ECS，不需要把 IP 写进 scrape target。
         </Alert>
       )}
       {error && (
-        <Alert title="后端错误" severity="error">
+        <Alert title="无法对齐" severity="error">
           {error}
         </Alert>
       )}
-      {data && !data.matched && (
+      {data?.error && (
+        <Alert title="后端错误" severity="error">
+          {data.error}
+        </Alert>
+      )}
+      {data && !data.matched && !data.error && (
         <Alert title="未匹配到 ECS" severity="warning">
-          查询值「{data.query}」对不上已缓存的实例。请确认插件配置了正确地域，且 target 是内网 IP 或主机名。
+          Prometheus 已定位到当前 Dashboard 的监控实例，但阿里云侧没有对应主机。请确认 ECS 主机名或实例名与 node_exporter 的 nodename / instance 一致。
         </Alert>
       )}
       {data?.instance && (
         <>
           <EcsFields instance={data.instance} />
-          {data.matchedBy && <p className={styles.muted}>匹配字段：{data.matchedBy}</p>}
+          <p className={styles.muted}>已与当前 Dashboard 的 Prometheus 实例对齐</p>
         </>
       )}
       {onDismiss && (

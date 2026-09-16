@@ -9,7 +9,7 @@
   "autoEnabled": true,
   "info": {
     "keywords": ["app", "ecs", "aliyun"],
-    "description": "在 Dashboard 上显示当前主机的 ECS ID 与规格（几核几 G）",
+    "description": "用 Prometheus 对齐已有 Dashboard，再向阿里云查询 ECS ID 与规格（不在界面展示 IP）",
     "author": { "name": "local" },
     "logos": {
       "small": "img/logo.svg",

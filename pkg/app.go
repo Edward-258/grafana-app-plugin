@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,11 +32,23 @@ type ecsCache struct {
 	instances []Instance
 }
 
+type promIdentity struct {
+	Instance string `json:"instance"`
+	NodeName string `json:"nodename"`
+	IP       string `json:"ip,omitempty"`
+}
+
+type enrichedAsset struct {
+	PublicAsset
+	MonitorName string `json:"monitorName,omitempty"`
+	Matched     bool   `json:"matched"`
+}
+
 func NewApp(_ context.Context, _ backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	a := &App{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", a.handleHealth)
-	mux.HandleFunc("/ecs/instances", a.handleList)
+	mux.HandleFunc("/ecs/enrich", a.handleEnrich)
 	mux.HandleFunc("/ecs/resolve", a.handleResolve)
 	mux.HandleFunc("/ecs/test", a.handleTest)
 	a.CallResourceHandler = httpadapter.New(mux)
@@ -62,39 +75,56 @@ func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (a *App) handleList(w http.ResponseWriter, r *http.Request) {
-	cfg, err := configFromRequest(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	list, err := a.instances(r.Context(), cfg)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"instances": list})
-}
-
 func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 	cfg, err := configFromRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"matched": false, "error": err.Error()})
 		return
 	}
-	q := r.URL.Query().Get("q")
-	list, err := a.instances(r.Context(), cfg)
+	ident := promIdentity{Instance: r.URL.Query().Get("q")}
+	if r.Body != nil && r.Method != http.MethodGet {
+		_ = json.NewDecoder(r.Body).Decode(&ident)
+	}
+	asset, ok, err := a.resolveAsset(r.Context(), cfg, ident)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]any{"matched": false, "error": err.Error()})
 		return
 	}
-	inst, by, ok := matchInstance(q, list)
-	resp := map[string]any{"query": q, "matched": ok}
+	resp := map[string]any{"matched": ok, "monitorName": monitorName(ident)}
 	if ok {
-		resp["instance"] = inst
-		resp["matchedBy"] = by
+		resp["instance"] = asset
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
+	cfg, err := configFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	var req struct {
+		Identities []promIdentity `json:"identities"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "无效的 Prometheus 标识列表"})
+		return
+	}
+	out := make([]enrichedAsset, 0, len(req.Identities))
+	for _, ident := range req.Identities {
+		row := enrichedAsset{MonitorName: monitorName(ident)}
+		asset, ok, err := a.resolveAsset(r.Context(), cfg, ident)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+			return
+		}
+		if ok {
+			row.PublicAsset = asset
+			row.Matched = true
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"instances": out})
 }
 
 func (a *App) handleTest(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +140,42 @@ func (a *App) handleTest(w http.ResponseWriter, r *http.Request) {
 	}
 	a.storeCache(cfg, list)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(list)})
+}
+
+func (a *App) resolveAsset(ctx context.Context, cfg Config, ident promIdentity) (PublicAsset, bool, error) {
+	ip := strings.TrimSpace(ident.IP)
+	if ip == "" {
+		ip = ipFromIdentity(ident.Instance)
+	}
+	if ip == "" {
+		ip = ipFromIdentity(ident.NodeName)
+	}
+	if ip == "" {
+		list, err := a.instances(ctx, cfg)
+		if err != nil {
+			return PublicAsset{}, false, err
+		}
+		inst, _, ok := matchIdentity(ident, list)
+		if !ok {
+			return PublicAsset{}, false, nil
+		}
+		if len(inst.PrivateIPs) > 0 {
+			ip = inst.PrivateIPs[0]
+		} else if len(inst.PublicIPs) > 0 {
+			ip = inst.PublicIPs[0]
+		} else {
+			return inst.Public(), true, nil
+		}
+	}
+
+	found, ok, err := newECSClient(cfg).GetByIP(ctx, ip)
+	if err != nil {
+		return PublicAsset{}, false, err
+	}
+	if ok {
+		return found.Public(), true, nil
+	}
+	return PublicAsset{}, false, nil
 }
 
 func (a *App) instances(ctx context.Context, cfg Config) ([]Instance, error) {
