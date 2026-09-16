@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "ECS 资产",
+  "id": "local-ecs-app",
+  "backend": true,
+  "executable": "gpx_ecs",
+  "preload": true,
+  "autoEnabled": true,
+  "info": {
+    "keywords": ["app", "ecs", "aliyun"],
+    "description": "在 Dashboard 上显示当前主机的 ECS ID 与规格（几核几 G）",
+    "author": { "name": "local" },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "ECS 资产",
+      "path": "/a/%PLUGIN_ID%",
+      "addToNav": true,
+      "defaultNav": true,
+      "icon": "cloud"
+    },
+    {
+      "type": "page",
+      "icon": "cog",
+      "name": "配置",
+      "path": "/plugins/%PLUGIN_ID%",
+      "role": "Admin",
+      "addToNav": true
+    }
+  ],
+  "extensions": {
+    "addedLinks": [
+      {
+        "title": "ECS 资产信息",
+        "description": "查看当前主机的 ECS ID 与规格",
+        "targets": ["grafana/dashboard/panel/menu"]
+      }
+    ]
+  },
+  "dependencies": {
+    "grafanaDependency": ">=11.1.0",
+    "plugins": []
+  }
+}
