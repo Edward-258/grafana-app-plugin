@@ -5,7 +5,7 @@
   "scripts": {
     "build": "webpack --env production && npm run build:backend",
     "build:frontend": "webpack --env production",
-    "build:backend": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o dist/gpx_ecs_linux_amd64 ./pkg",
+    "build:backend": "PATH=\"$HOME/.local/go/bin:$HOME/go/bin:$PATH\" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o dist/gpx_ecs_linux_amd64 ./pkg",
     "dev": "webpack -w --env development",
     "server": "docker compose up"
   },
