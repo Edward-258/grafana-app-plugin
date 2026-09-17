@@ -37,6 +37,15 @@
       "addToNav": true
     }
   ],
+  "extensions": {
+    "addedLinks": [
+      {
+        "title": "ECS 资产信息",
+        "description": "查看当前主机的 ECS ID 与规格",
+        "targets": ["grafana/dashboard/panel/menu"]
+      }
+    ]
+  },
   "dependencies": {
     "grafanaDependency": ">=11.1.0",
     "plugins": []
