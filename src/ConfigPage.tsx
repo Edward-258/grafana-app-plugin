@@ -8,7 +8,6 @@ import pluginJson from './plugin.json';
 import { queryPrometheus } from './prom';
 
 export type AppSettings = {
-  region?: string;
   accessKeyId?: string;
   prometheusUid?: string;
   instanceLabel?: string;
@@ -28,7 +27,6 @@ export default function ConfigPage(_props: Props = {}) {
   const [ready, setReady] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const [pinned, setPinned] = useState(true);
-  const [region, setRegion] = useState('cn-hangzhou');
   const [accessKeyId, setAccessKeyId] = useState('');
   const [accessKeySecret, setAccessKeySecret] = useState('');
   const [secretConfigured, setSecretConfigured] = useState(false);
@@ -45,7 +43,6 @@ export default function ConfigPage(_props: Props = {}) {
         const settings = await getBackendSrv().get<PluginSettings>(`/api/plugins/${pluginJson.id}/settings`);
         setEnabled(settings.enabled ?? true);
         setPinned(settings.pinned ?? true);
-        setRegion(settings.jsonData?.region || 'cn-hangzhou');
         setAccessKeyId(settings.jsonData?.accessKeyId || '');
         setPrometheusUid(settings.jsonData?.prometheusUid || '');
         setInstanceLabel(settings.jsonData?.instanceLabel || 'instance');
@@ -67,7 +64,6 @@ export default function ConfigPage(_props: Props = {}) {
         enabled,
         pinned,
         jsonData: {
-          region: region.trim(),
           accessKeyId: accessKeyId.trim(),
           prometheusUid,
           instanceLabel: instanceLabel.trim() || 'instance',
@@ -99,14 +95,14 @@ export default function ConfigPage(_props: Props = {}) {
       } else {
         parts.push('未选择 Prometheus 数据源');
       }
-      const res = await getBackendSrv().post<{ ok: boolean; count?: number; error?: string }>(
+      const res = await getBackendSrv().post<{ ok: boolean; count?: number; regions?: number; error?: string }>(
         `/api/plugins/${pluginJson.id}/resources/ecs/test`,
         {}
       );
       if (!res.ok) {
         throw new Error(res.error || '阿里云测试失败');
       }
-      parts.push(`阿里云当前地域 ${res.count ?? 0} 台 ECS`);
+      parts.push(`阿里云全部地域共 ${res.count ?? 0} 台 ECS，覆盖 ${res.regions ?? 0} 个地域`);
       setMessage(parts.join('；'));
     } catch (e) {
       setError(e instanceof Error ? e.message : '测试失败，请先保存配置');
@@ -150,10 +146,11 @@ export default function ConfigPage(_props: Props = {}) {
       </FieldSet>
 
       <FieldSet label="阿里云 ECS（只读，查 ID 与规格）" className={styles.gap}>
-        <Field label="Region" description="例如 cn-hangzhou、cn-beijing">
-          <Input width={60} value={region} onChange={(e: ChangeEvent<HTMLInputElement>) => setRegion(e.target.value)} />
-        </Field>
-        <Field label="AccessKey ID" className={styles.gap}>
+        <Field
+          label="AccessKey ID"
+          description="插件会自动枚举这把 AK 可见的全部地域，无需指定 Region"
+          className={styles.gap}
+        >
           <Input
             width={60}
             value={accessKeyId}
@@ -183,7 +180,7 @@ export default function ConfigPage(_props: Props = {}) {
           </Alert>
         )}
         <div className={styles.gap}>
-          <Button type="submit" disabled={saving || !region || !accessKeyId || (!secretConfigured && !accessKeySecret)}>
+          <Button type="submit" disabled={saving || !accessKeyId || (!secretConfigured && !accessKeySecret)}>
             保存
           </Button>
           <Button type="button" variant="secondary" className={styles.btn} onClick={() => void onTest()} disabled={testing}>

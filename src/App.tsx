@@ -67,7 +67,10 @@ export default function App({ query }: AppProps) {
       return instances;
     }
     return instances.filter((i) =>
-      [i.instanceId, i.instanceName, i.hostName, i.instanceType, i.monitorName].join(' ').toLowerCase().includes(q)
+      [i.instanceId, i.instanceName, i.hostName, i.instanceType, i.regionId, i.monitorName]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
     );
   }, [instances, filter]);
 
@@ -87,7 +90,7 @@ export default function App({ query }: AppProps) {
       {tab === 'assets' && (
         <>
           <div className={styles.toolbar}>
-            <FilterInput placeholder="搜索 ECS ID / 名称 / 规格" value={filter} onChange={setFilter} />
+            <FilterInput placeholder="搜索 ECS ID / 名称 / 规格 / 地域" value={filter} onChange={setFilter} />
           </div>
 
           {loading && <LoadingPlaceholder text="正在从 Prometheus 对齐 ECS..." />}
@@ -113,6 +116,7 @@ export default function App({ query }: AppProps) {
                   <th>ECS ID</th>
                   <th>名称</th>
                   <th>规格</th>
+                  <th>地域</th>
                   <th>vCPU</th>
                   <th>内存</th>
                 </tr>
@@ -121,9 +125,13 @@ export default function App({ query }: AppProps) {
                 {rows.map((row, idx) => (
                   <tr key={row.instanceId || row.monitorName || String(idx)} onClick={() => setSelected(row)}>
                     <td>{row.monitorName || '—'}</td>
-                    <td>{row.matched === false || !row.instanceId ? '未匹配' : row.instanceId}</td>
+                    <td>
+                      {row.matched === false || !row.instanceId ? '未匹配' : row.instanceId}
+                      {row.matched === false && row.note && <div className={styles.note}>{row.note}</div>}
+                    </td>
                     <td>{row.instanceName || row.hostName || '—'}</td>
                     <td>{row.instanceType || '—'}</td>
+                    <td>{row.regionId || '—'}</td>
                     <td>{row.cpu || '—'}</td>
                     <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
                   </tr>
@@ -181,5 +189,10 @@ const getStyles = (theme: GrafanaTheme2) => ({
     border: `1px solid ${theme.colors.border.weak}`,
     borderRadius: theme.shape.radius.default,
     maxWidth: 480,
+  }),
+  note: css({
+    color: theme.colors.text.secondary,
+    fontSize: theme.typography.bodySmall.fontSize,
+    fontFamily: theme.typography.fontFamily,
   }),
 });

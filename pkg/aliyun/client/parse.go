@@ -1,8 +1,6 @@
 package client
 
 import (
-	"fmt"
-
 	"local-ecs-app/pkg/aliyun/model"
 )
 
@@ -61,14 +59,9 @@ func (r rawInstance) toInstance() model.Instance {
 	}
 }
 
-func apiError(parsed describeResponse, status int, body []byte) error {
-	if parsed.Code != "" && parsed.Message != "" {
-		return fmt.Errorf("阿里云 %s: %s", parsed.Code, parsed.Message)
-	}
-	if status >= 400 {
-		return fmt.Errorf("阿里云 HTTP %d: %s", status, truncate(string(body), 300))
-	}
-	return nil
+type apiEnvelope struct {
+	Code    string `json:"Code"`
+	Message string `json:"Message"`
 }
 
 func truncate(s string, n int) string {

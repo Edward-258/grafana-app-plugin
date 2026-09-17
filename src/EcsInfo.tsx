@@ -13,13 +13,17 @@ export type EcsAsset = {
   instanceType: string;
   cpu: number;
   memoryGiB: number;
+  zoneId?: string;
+  regionId?: string;
   monitorName?: string;
   matched?: boolean;
+  note?: string;
 };
 
 type ResolveResponse = {
   matched: boolean;
   monitorName?: string;
+  note?: string;
   instance?: EcsAsset;
   error?: string;
 };
@@ -63,6 +67,11 @@ export function EcsFields({ instance }: { instance: EcsAsset }) {
           {' '}
           / {instance.cpu} 核 / {instance.memoryGiB} GiB
         </span>
+      </dd>
+      <dt>地域</dt>
+      <dd>
+        {instance.regionId || '—'}
+        {instance.zoneId ? <span className={styles.muted}> / {instance.zoneId}</span> : null}
       </dd>
       <dt>名称</dt>
       <dd>{instance.instanceName || instance.hostName || instance.monitorName || '—'}</dd>
@@ -125,7 +134,8 @@ export function EcsModalBody({ onDismiss }: { onDismiss?: () => void }) {
       )}
       {data && !data.matched && !data.error && (
         <Alert title="未匹配到 ECS" severity="warning">
-          Prometheus 已定位到当前 Dashboard 的监控实例，但阿里云侧没有对应主机。请确认 ECS 主机名或实例名与 node_exporter 的 nodename / instance 一致。
+          Prometheus 已定位到当前 Dashboard 的监控实例，但阿里云侧没有唯一对应的主机。
+          {data.note ? `（${data.note}）` : ''}请确认 ECS 主机名或实例名与 node_exporter 的 nodename / instance 一致。
         </Alert>
       )}
       {data?.instance && (

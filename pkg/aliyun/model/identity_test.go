@@ -46,3 +46,42 @@ func TestIPFromIdentity(t *testing.T) {
 		t.Fatalf("must not surface IP as MonitorName, got %q", got)
 	}
 }
+
+func TestMatchRequiresUniqueWeakHits(t *testing.T) {
+	list := []Instance{
+		{InstanceID: "i-1", HostName: "web-1", InstanceName: "app", PrivateIPs: []string{"10.0.0.1"}, RegionID: "cn-hangzhou"},
+		{InstanceID: "i-2", HostName: "web-1", InstanceName: "db", PrivateIPs: []string{"10.0.0.2"}, RegionID: "cn-heyuan"},
+		{InstanceID: "i-3", HostName: "cache", InstanceName: "cache", PublicIPs: []string{"203.0.113.5"}, RegionID: "cn-beijing"},
+	}
+
+	if inst, by, _, ok := Match("i-2", list); !ok || by != "instanceId" || inst.RegionID != "cn-heyuan" {
+		t.Fatalf("instanceId match failed: by=%q ok=%v", by, ok)
+	}
+	if _, by, _, ok := Match("10.0.0.2:9100", list); !ok || by != "ip" {
+		t.Fatalf("unique ip should match, by=%q ok=%v", by, ok)
+	}
+	if _, _, note, ok := Match("web-1", list); ok || note == "" {
+		t.Fatalf("hostname duplicated across regions must stay unmatched, ok=%v note=%q", ok, note)
+	}
+	if _, by, _, ok := Match("db", list); !ok || by != "instanceName" {
+		t.Fatalf("unique instanceName should match, by=%q ok=%v", by, ok)
+	}
+	if _, _, _, ok := Match("missing", list); ok {
+		t.Fatal("unknown name must not match")
+	}
+	if _, _, note, ok := MatchIdentity(Identity{Instance: "10.0.0.1:9100", NodeName: "web-1"}, list); !ok {
+		t.Fatalf("identity via ip should match, note=%q", note)
+	}
+}
+
+func TestRegionSet(t *testing.T) {
+	list := []Instance{
+		{InstanceID: "i-1", RegionID: "cn-hangzhou"},
+		{InstanceID: "i-2", RegionID: "cn-hangzhou"},
+		{InstanceID: "i-3", RegionID: "cn-heyuan"},
+		{InstanceID: "i-4"},
+	}
+	if got := RegionSet(list); len(got) != 2 {
+		t.Fatalf("want 2 regions, got %v", got)
+	}
+}

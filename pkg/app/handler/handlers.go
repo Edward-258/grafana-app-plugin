@@ -27,12 +27,15 @@ func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil && r.Method != http.MethodGet {
 		_ = json.NewDecoder(r.Body).Decode(&ident)
 	}
-	asset, ok, err := a.resolver.Resolve(r.Context(), cfg, ident)
+	asset, ok, note, err := a.resolver.Resolve(r.Context(), cfg, ident)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"matched": false, "error": err.Error()})
 		return
 	}
 	resp := map[string]any{"matched": ok, "monitorName": a.resolver.MonitorName(ident)}
+	if note != "" {
+		resp["note"] = note
+	}
 	if ok {
 		resp["instance"] = asset
 	}
@@ -66,10 +69,10 @@ func (a *App) handleTest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	n, err := a.resolver.Test(r.Context(), cfg)
+	n, regions, err := a.resolver.Test(r.Context(), cfg)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": n})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": n, "regions": regions})
 }

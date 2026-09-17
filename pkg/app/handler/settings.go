@@ -10,7 +10,6 @@ import (
 )
 
 type jsonData struct {
-	Region      string `json:"region"`
 	AccessKeyID string `json:"accessKeyId"`
 }
 
@@ -19,16 +18,13 @@ func configFromRequest(r *http.Request) (service.Config, error) {
 }
 
 func configFrom(pCtx backend.PluginContext) (service.Config, error) {
-	cfg := service.Config{Region: "cn-hangzhou"}
+	cfg := service.Config{}
 	if pCtx.AppInstanceSettings == nil {
 		return cfg, service.ErrNoSettings
 	}
 	var data jsonData
 	if len(pCtx.AppInstanceSettings.JSONData) > 0 {
 		_ = json.Unmarshal(pCtx.AppInstanceSettings.JSONData, &data)
-		if data.Region != "" {
-			cfg.Region = data.Region
-		}
 		cfg.AccessKeyID = data.AccessKeyID
 	}
 	if pCtx.AppInstanceSettings.DecryptedSecureJSONData != nil {

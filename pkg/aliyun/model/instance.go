@@ -2,10 +2,9 @@ package model
 
 import "errors"
 
-var ErrNoSettings = errors.New("未配置 AccessKey，请到插件配置页填写 Region / AccessKey")
+var ErrNoSettings = errors.New("未配置 AccessKey，请到插件配置页填写 AccessKey")
 
 type Config struct {
-	Region          string
 	AccessKeyID     string
 	AccessKeySecret string
 }
@@ -47,6 +46,23 @@ func (i Instance) Public() PublicAsset {
 		ZoneID:       i.ZoneID,
 		RegionID:     i.RegionID,
 	}
+}
+
+// RegionSet returns the distinct regions covered by the list.
+func RegionSet(list []Instance) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(list))
+	for _, inst := range list {
+		if inst.RegionID == "" {
+			continue
+		}
+		if _, ok := seen[inst.RegionID]; ok {
+			continue
+		}
+		seen[inst.RegionID] = struct{}{}
+		out = append(out, inst.RegionID)
+	}
+	return out
 }
 
 func Unique(in []string) []string {
