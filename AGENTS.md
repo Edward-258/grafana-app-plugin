@@ -9,7 +9,20 @@ Grafana App 插件 `local-ecs-app`：阿里云 ECS 资产（ID/规格/地域）�
 1. **UI 扩展双登记**：代码 `addLink()` 注册的扩展必须同时在 `src/plugin.json` 的 `extensions.addedLinks[]` 声明，缺一会静默消失（无 server 日志，只有浏览器 console 报错）。改动 plugin.json 或扩展注册后必须浏览器验证菜单仍存在。
 2. **ECS IP 永不进浏览器**：后端 `Public()` 裁剪 + `TestPublicAssetOmitsIPs` 守护，任何 model/接口改动不得让 IP 到达前端。
 3. **AK 严格对应**：资产只能来自该 AK 的全地域枚举且唯一命中；任一地域查询失败则整体失败，禁止部分结果。
-4. **secret 只进 `secureJsonData`**：`jsonData` 禁存敏感值；保存时只发被修改的键（空字符串也会覆盖旧值）。
+4. **凭证只进 `secureJsonData`**：AK ID 与 Secret 都属加密存储（`jsonData` 禁存敏感值）；保存时只发被修改的键（空字符串也会覆盖旧值）。Viewer 只能见脱敏 AK ID（前3+后3），完整值仅 `ecs:reveal` 持有者可得（`/ecs/ak` 端点按角色下发）。
+
+## RBAC 权限矩阵（plugin.json roles[] + 后端 requireAction）
+
+| action | grants | 能做什么 |
+|---|---|---|
+| `local-ecs-app.ecs:read` | Viewer/Editor/Admin | 资产对齐端点（enrich/resolve）、脱敏 AK |
+| `local-ecs-app.ecs:reveal` | Editor/Admin | 完整 AK（小眼睛）、连通测试 |
+| `local-ecs-app.ecs:write` | 仅 Admin | 改写 AK ID/Secret、配置页保存 |
+
+- 后端 `pkg/app/handler/auth.go`：有 `X-Grafana-Id` 走官方 authz client；authz 出错或匿名时降级为 `PluginContext.User.Role` 的 org 角色映射（与 grants 一致，不放大权限）；无用户信息一律 403。
+- 前端用 `hasPermission()`（`@grafana/runtime`）门禁；`?tab=config` 路径会被 Grafana 按 include 的 action 门禁匹配到 write，Viewer 直达被挡属预期。
+- **权限结论必须以真实登录用户为准**：匿名会话会被前端导航守卫重定向回首页，即使权限 API 显示有权限（已实测踩坑）。
+- 生效前提（compose 已配）：`GF_FEATURE_TOGGLES_ENABLE=externalServiceAccounts` **且** `GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED=true`（后者官方文档没写，缺了 Grafana 不给插件配 service account）。
 
 ## 已知隐患
 
@@ -24,11 +37,13 @@ npx tsc --noEmit                       # 前端类型
 docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允许未签名）
 ```
 
-改 `plugin.json` 后必须重建 + 重启 Grafana。UI 行为验证用无头浏览器（CDP :9222，容器内访问宿主机用 `http://172.17.0.1:3000`），skill 见 `~/.agents/skills/playwright-browser/`。
+- `grafana-data` 命名卷持久化 grafana.db：`--force-recreate`/`restart` 不丢库，`docker compose down -v` 才删。
+- 改 `plugin.json` 后必须重建 + 重启 Grafana。UI 行为验证用无头浏览器（CDP :9222，容器内访问宿主机用 `http://172.17.0.1:3000`），skill 见 `~/.agents/skills/playwright-browser/`（现成脚本：`~/.zcode/tools/pw-browser/` 下 `rbac-regression.js`、`rbac-panel-menu.js`、`grafana-menu-check.js`）。
+- 权限回归对照实例：`docker compose -f docker-compose.yaml -f docker-compose.viewer.yaml up -d grafana-viewer`（3001 端口，匿名 Viewer + 内置 admin 登录，可用 Admin API 建真实用户；其库故意不持久，测完 down 掉归零）。
 
 ## 架构分层
 
 - `src/` 前端（module.tsx 注册 root page / config page / 面板菜单扩展；import 分层有约定，勿破坏）
 - `pkg/aliyun/` 阿里云 OpenAPI（RPC 签名、全地域枚举、唯一命中匹配）
-- `pkg/app/` 插件后端（ServeMux + httpadapter，资源端点 `/ecs/enrich|resolve|test`、`/health`）
+- `pkg/app/` 插件后端（ServeMux + httpadapter；资源端点 `/ecs/enrich|resolve|test|ak`、`/health`；`auth.go` RBAC 中间件）
 - `provisioning/` Grafana 部署配置

@@ -83,11 +83,23 @@
 - 打包：dist 重命名为插件 id 再 zip；二进制 0755；CHANGELOG.md 必备。
 - 发布审查会跑 plugin-validator（github.com/grafana/plugin-validator），CI 可集成。
 
-## 8. RBAC（11.6+）
+## 8. RBAC（11.6+，本项目已实现并验证）
 
-- OSS 可用：`plugin.json roles[]` 定义 + `grants` 自动授予；前端 `hasPermission()`（`@grafana/runtime`）；includes 用 `action` 控制页面可见性。
-- **后端资源端点 action 校验**需开 `externalServiceAccounts` feature toggle + authlib/authz client（仅支持单 org）；给用户赋自定义角色需 Enterprise/Cloud。
-- 现状：本项目资源端点只要求登录，无角色检查。单机自用可接受；多用户需加固（轻量做法：handler 里查调用者 org role）。
+官方三件套 + 后端 action 校验，2026-09 落地：
+
+- `plugin.json`：`roles[]` 三个自定义 action（read/reveal/write，grants 矩阵见 AGENTS.md）+ `iam` 段（`users.permissions:read`, scope `users:*`）+ includes 用 `action` 替代 `role` 做页面门禁。
+- 前端：`hasPermission()`（`@grafana/runtime`）门禁 UI（小眼睛/保存/更换/测试按钮）。
+- 后端：`github.com/grafana/authlib/authz` EnforcementClient + `requireAction` 中间件，读 `X-Grafana-Id` 头校验 action。
+- 给特定用户赋自定义角色需 Enterprise/Cloud；`grants` 自动授予内置角色在 OSS 可用（本项目依赖的就是 grants）。
+
+实战踩坑记录（排错先看）：
+
+1. **service account 配不出来**：光开 `externalServiceAccounts` toggle 不够，还要 `GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED=true`（即 `[auth] managed_service_accounts_enabled`，默认 false）。官方 RBAC 指南没提这个开关；缺了 SDK 报 "PluginAppClientSecret not set in config"（v11.6 源码 `serviceregistration.go:25` 是 toggle AND 配置）。
+2. **匿名请求也带 `X-Grafana-Id`**，但授权服务器拒绝查询匿名 token（"can only query server for users and service-accounts"）。对策：authz 出错时降级到 `PluginContext.User.Role` 的 org 角色映射（与 grants 保持一致，不放大权限），而非一律 403。
+3. **匿名会话的前端页面守卫不可信**：权限 API 显示有 `ecs:read`，匿名访问 `/a/<id>` 仍被重定向回首页；真实登录用户正常。**权限结论必须以真实登录用户为准**。
+4. **页面 URL 按 include 的 action 匹配**：`?tab=config` 匹配到配置 include（action=write），Viewer 直达被挡是预期语义，不是 bug。
+5. 11.6 的 RBAC 角色在新 authz 存储：legacy `role` 表为空、`/api/access-control/roles` 404；验证有效权限用 `GET /api/access-control/user/permissions`（返回 action 列表）。
+6. 插件角色在插件启动注册时经 `DeclarePluginRoles` 登记，改 `roles[]` 重启即生效。
 
 ## 9. 11.6 → 12 迁移检查点
 
@@ -99,13 +111,15 @@
 
 1. ⚠️ 扩展 title 改为 ≥10 字符（"查看 ECS 资产信息"），消除升级隐患。
 2. 补 `CHANGELOG.md`（官方 Required，成本最低）。
-3. 多用户场景：资源端点加角色保护（见 §8）。
+3. ~~资源端点加角色保护~~ ✅ 2026-09 已完成（见 §8）。
 4. 若走出本机：决定私有签名 + 是否改 plugin id（见 §7）。
-5. 可选：把"面板菜单出现 ECS 入口"固化成 Playwright 断言脚本（官方 @grafana/plugin-e2e 同思路）。
+5. ~~E2E 固化~~ 部分完成：`~/.zcode/tools/pw-browser/` 已有 rbac-regression / rbac-panel-menu / grafana-menu-check 回归脚本，可按需扩展成正式套件。
 6. 可选锦上添花：Magefile 跨平台构建、LICENSE、screenshots、`state` 字段、React.lazy 分页。
 
-## 11. 项目验证策略（本次会话确立）
+## 11. 项目验证策略（持续更新）
 
 - Go：`go vet ./... && go test ./...`
 - 前端：`npx tsc --noEmit && npm run build`
 - **声明式契约（plugin.json、扩展注册）改动后：必须无头浏览器断言**（headless-shell 容器 CDP :9222 + playwright-core，见 ~/.agents/skills/playwright-browser/）。容器启动：`docker run -d --name headless-chrome --restart unless-stopped -p 127.0.0.1:9222:9222 chromedp/headless-shell --no-sandbox`；容器内访问宿主机 Grafana 用 `http://172.17.0.1:3000`。
+- **RBAC/权限改动回归**：起 viewer 对照实例（`docker-compose.viewer.yaml`，3001 匿名 Viewer + admin 登录），用 Admin API 建真实 Viewer 用户下结论；curl 对照 `/ecs/ak`（masked 无 full）与 `/ecs/test`（403）。
+- grafana.db 在 `grafana-data` 命名卷里，`--force-recreate` 不丢库（`down -v` 才删）——重建后无需重录 AK/数据源。

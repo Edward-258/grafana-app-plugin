@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
+
 	"local-ecs-app/pkg/app/service"
 )
 
@@ -75,4 +77,39 @@ func (a *App) handleTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": n, "regions": regions})
+}
+
+// handleAK 下发 AccessKey ID 的展示信息：所有人拿脱敏值，
+// 完整值仅持有 ecs:reveal 的调用者（Editor/Admin）可见。
+func (a *App) handleAK(w http.ResponseWriter, r *http.Request) {
+	pCtx := backend.PluginConfigFromContext(r.Context())
+	value, legacy, configured := currentAccessKeyID(pCtx)
+	resp := map[string]any{
+		"configured": configured,
+		"masked":     maskAccessKeyID(value),
+	}
+	if legacy {
+		resp["legacy"] = true
+	}
+	if configured && a.hasAction(r, actionReveal) {
+		resp["canReveal"] = true
+		resp["full"] = value
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// maskAccessKeyID 脱敏：常规长度前 3 后 3，过短则更严。
+func maskAccessKeyID(v string) string {
+	runes := []rune(v)
+	n := len(runes)
+	switch {
+	case n == 0:
+		return ""
+	case n < 6:
+		return "***"
+	case n < 10:
+		return string(runes[:2]) + "…" + string(runes[n-2:])
+	default:
+		return string(runes[:3]) + "…" + string(runes[n-3:])
+	}
 }

@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sync"
 
+	"github.com/grafana/authlib/authz"
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
@@ -20,15 +22,20 @@ var (
 type App struct {
 	backend.CallResourceHandler
 	resolver *service.Resolver
+
+	mx          sync.Mutex
+	saToken     string
+	authzClient *authz.EnforcementClientImpl
 }
 
 func NewApp(_ context.Context, _ backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	a := &App{resolver: service.NewResolver()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", a.handleHealth)
-	mux.HandleFunc("/ecs/enrich", a.handleEnrich)
-	mux.HandleFunc("/ecs/resolve", a.handleResolve)
-	mux.HandleFunc("/ecs/test", a.handleTest)
+	mux.HandleFunc("/ecs/enrich", a.requireAction(actionRead, a.handleEnrich))
+	mux.HandleFunc("/ecs/resolve", a.requireAction(actionRead, a.handleResolve))
+	mux.HandleFunc("/ecs/ak", a.requireAction(actionRead, a.handleAK))
+	mux.HandleFunc("/ecs/test", a.requireAction(actionReveal, a.handleTest))
 	a.CallResourceHandler = httpadapter.New(mux)
 	return a, nil
 }

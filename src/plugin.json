@@ -26,17 +26,55 @@
       "path": "/a/%PLUGIN_ID%",
       "addToNav": true,
       "defaultNav": true,
-      "icon": "cloud"
+      "icon": "cloud",
+      "action": "%PLUGIN_ID%.ecs:read"
     },
     {
       "type": "page",
       "icon": "cog",
       "name": "配置",
       "path": "/a/%PLUGIN_ID%?tab=config",
-      "role": "Admin",
+      "action": "%PLUGIN_ID%.ecs:write",
       "addToNav": true
     }
   ],
+  "roles": [
+    {
+      "role": {
+        "name": "ECS 资产查看",
+        "description": "查看 ECS 资产对齐信息与脱敏后的 AccessKey ID",
+        "permissions": [
+        {"action": "%PLUGIN_ID%.ecs:read"}
+        ]
+      },
+      "grants": ["Viewer", "Editor", "Admin"]
+    },
+    {
+      "role": {
+        "name": "ECS AccessKey 查看",
+        "description": "展开完整 AccessKey ID 并测试阿里云连通性",
+        "permissions": [
+        {"action": "%PLUGIN_ID%.ecs:reveal"}
+        ]
+      },
+      "grants": ["Editor", "Admin"]
+    },
+    {
+      "role": {
+        "name": "ECS AccessKey 管理",
+        "description": "修改 AccessKey ID 与 AccessKey Secret",
+        "permissions": [
+        {"action": "%PLUGIN_ID%.ecs:write"}
+        ]
+      },
+      "grants": ["Admin"]
+    }
+  ],
+  "iam": {
+    "permissions": [
+    {"action": "users.permissions:read", "scope": "users:*"}
+    ]
+  },
   "extensions": {
     "addedLinks": [
       {
@@ -47,7 +85,7 @@
     ]
   },
   "dependencies": {
-    "grafanaDependency": ">=11.1.0",
+    "grafanaDependency": ">=11.6.0",
     "plugins": []
   }
 }
