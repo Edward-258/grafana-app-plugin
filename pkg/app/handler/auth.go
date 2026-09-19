@@ -12,23 +12,11 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
-// 插件自定义 RBAC action，与 plugin.json 的 roles[] 声明一一对应。
-const (
-	actionRead   = "local-ecs-app.ecs:read"   // 资产对齐 + 脱敏 AccessKey
-	actionReveal = "local-ecs-app.ecs:reveal" // 展开完整 AccessKey ID + 连通测试
-	actionWrite  = "local-ecs-app.ecs:write"  // 修改 AccessKey ID / Secret
-)
+// RBAC action 常量、PluginID 与 roleActions 回退映射全部由 zz_generated.go
+// 从 src/plugin.json 生成（scripts/gen-permissions.js），本文件不再手写任何权限字符串。
 
 // Grafana 转发用户身份 id token 的 header（需 externalServiceAccounts / idForwarded）。
 const idTokenHeader = "X-Grafana-Id"
-
-// roleActions 是无 id token 时的回退映射（匿名访问、未开 externalServiceAccounts），
-// 授予关系必须与 plugin.json 中各角色的 grants 保持一致。
-var roleActions = map[string]map[string]bool{
-	"Viewer": {actionRead: true},
-	"Editor": {actionRead: true, actionReveal: true},
-	"Admin":  {actionRead: true, actionReveal: true, actionWrite: true},
-}
 
 // authZClient 返回按官方 RBAC 指南初始化的 authz 客户端；service account token
 // 不变时复用同一实例（token 来自 GrafanaConfig，由 iam 配置段下发）。
@@ -64,7 +52,7 @@ func (a *App) authZClient(r *http.Request) (*authz.EnforcementClientImpl, error)
 			Token:   saToken,
 			JWKsURL: strings.TrimRight(grafanaURL, "/") + "/api/signing-keys/keys",
 		},
-		authz.WithSearchByPrefix("local-ecs-app"),
+		authz.WithSearchByPrefix(PluginID),
 		authz.WithCache(authzcache.NewLocalCache(authzcache.Config{
 			Expiry:          10 * time.Second,
 			CleanupInterval: 5 * time.Second,

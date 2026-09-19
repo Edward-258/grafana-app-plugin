@@ -2,7 +2,7 @@ const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const pkg = require('./package.json');
 
-const pluginId = 'local-ecs-app';
+const pluginId = pkg.name; // 插件 ID 唯一源头：package.json name（gen-permissions.js 同源）
 
 module.exports = (env = {}) => {
   const production = Boolean(env.production);

@@ -5,6 +5,7 @@ import { AppPluginMeta, GrafanaTheme2, PluginConfigPageProps, PluginMeta } from 
 import { DataSourcePicker, getBackendSrv, hasPermission } from '@grafana/runtime';
 import { Alert, Button, Field, FieldSet, IconButton, Input, LoadingPlaceholder, SecretInput, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
+import { ACTION_REVEAL, ACTION_WRITE } from './permissions.gen';
 import { queryPrometheus } from './prom';
 
 export type AppSettings = {
@@ -33,8 +34,8 @@ type Props = Partial<PluginConfigPageProps<AppPluginMeta<AppSettings>>>;
 
 export default function ConfigPage(_props: Props = {}) {
   const styles = useStyles2(getStyles);
-  const canWrite = hasPermission('local-ecs-app.ecs:write') === true;
-  const canReveal = hasPermission('local-ecs-app.ecs:reveal') === true;
+  const canWrite = hasPermission(ACTION_WRITE) === true;
+  const canReveal = hasPermission(ACTION_REVEAL) === true;
   const [ready, setReady] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const [pinned, setPinned] = useState(true);
