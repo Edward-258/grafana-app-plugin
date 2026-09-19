@@ -56,8 +56,12 @@ func Match(query string, list []Instance) (Instance, string, string, bool) {
 	}{
 		{"instanceId", "", func(i Instance) bool { return i.InstanceID == q || (host != "" && i.InstanceID == host) }},
 		{"ip", "IP 命中多个实例", func(i Instance) bool { return contains(i.PrivateIPs, q, host) || contains(i.PublicIPs, q, host) }},
-		{"hostName", "主机名命中多个实例", func(i Instance) bool { return i.HostName != "" && (i.HostName == q || (host != "" && i.HostName == host)) }},
-		{"instanceName", "实例名命中多个实例", func(i Instance) bool { return i.InstanceName != "" && (i.InstanceName == q || (host != "" && i.InstanceName == host)) }},
+		{"hostName", "主机名命中多个实例", func(i Instance) bool {
+			return i.HostName != "" && (i.HostName == q || (host != "" && i.HostName == host))
+		}},
+		{"instanceName", "实例名命中多个实例", func(i Instance) bool {
+			return i.InstanceName != "" && (i.InstanceName == q || (host != "" && i.InstanceName == host))
+		}},
 	}
 	for _, step := range steps {
 		found := collect(list, step.hits)

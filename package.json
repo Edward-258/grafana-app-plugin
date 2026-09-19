@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "webpack --env production && npm run build:backend",
+    "gen:permissions": "node scripts/gen-permissions.js",
+    "build": "node scripts/gen-permissions.js && webpack --env production && npm run build:backend",
     "build:frontend": "webpack --env production",
     "build:backend": "PATH=\"$HOME/.local/go/bin:$HOME/go/bin:$PATH\" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o dist/gpx_ecs_linux_amd64 ./pkg",
     "dev": "webpack -w --env development",

@@ -100,6 +100,11 @@
 4. **页面 URL 按 include 的 action 匹配**：`?tab=config` 匹配到配置 include（action=write），Viewer 直达被挡是预期语义，不是 bug。
 5. 11.6 的 RBAC 角色在新 authz 存储：legacy `role` 表为空、`/api/access-control/roles` 404；验证有效权限用 `GET /api/access-control/user/permissions`（返回 action 列表）。
 6. 插件角色在插件启动注册时经 `DeclarePluginRoles` 登记，改 `roles[]` 重启即生效。
+7. **authlib 版本配对约束**：`github.com/grafana/authlib` 主包与 `authlib/types` 子包必须同日期 pseudo-version 配对（当前均 20260814）；`go get -u` 一把就能拉散，症状是 `types.GetUserPermissionsResponse undefined` 编译错误。修复：两个包一起 `go get ...@latest`。
+
+### 常量单源生成（本项目约定）
+
+RBAC action 字符串天然要出现在 plugin.json（声明）、Go（执行）、TS（展示）三处。本项目以 `src/plugin.json` 为唯一源头，`scripts/gen-permissions.js` 编译期生成 Go/TS 常量与回退映射，`zz_generated_test.go` 用独立实现的推导逻辑 + 硬编码语义锚点守护（改源头不重新生成 → go test 红）。新增 action 的显式摩擦点：生成器 `SEMANTIC` 表 + 守护测试的 suffix switch，两处都要登记。
 
 ## 9. 11.6 → 12 迁移检查点
 

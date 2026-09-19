@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	if err := app.Manage("local-ecs-app", handler.NewApp, app.ManageOpts{}); err != nil {
+	if err := app.Manage(handler.PluginID, handler.NewApp, app.ManageOpts{}); err != nil {
 		log.DefaultLogger.Error(err.Error())
 		os.Exit(1)
 	}
