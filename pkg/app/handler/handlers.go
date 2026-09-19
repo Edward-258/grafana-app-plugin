@@ -17,11 +17,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// fail 统一错误出口：配置缺失是调用方问题（400），其余视为上游/阿里云故障（502）。
+// fail 统一错误出口：配置缺失、标识超量是调用方问题（400），其余视为上游/阿里云故障（502）。
 // extra 里的键会并入响应体（如 matched:false / ok:false），保持前端契约不变。
 func fail(w http.ResponseWriter, err error, extra map[string]any) {
 	status := http.StatusBadGateway
-	if errors.Is(err, service.ErrNoSettings) {
+	if errors.Is(err, service.ErrNoSettings) || errors.Is(err, ErrTooManyIdentities) {
 		status = http.StatusBadRequest
 	}
 	resp := map[string]any{"error": err.Error()}
@@ -42,8 +42,7 @@ func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var ident service.Identity
-	if err := json.NewDecoder(r.Body).Decode(&ident); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"matched": false, "error": "无效的请求体"})
+	if !decodeBody(w, r, &ident) {
 		return
 	}
 	asset, ok, note, err := a.resolver.Resolve(r.Context(), cfg, ident)
@@ -70,8 +69,11 @@ func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Identities []service.Identity `json:"identities"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "无效的 Prometheus 标识列表"})
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if err := ValidateIdentities(req.Identities); err != nil {
+		fail(w, err, nil)
 		return
 	}
 	out, err := a.resolver.Enrich(r.Context(), cfg, req.Identities)
