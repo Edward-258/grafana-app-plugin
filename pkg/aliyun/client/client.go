@@ -71,6 +71,11 @@ func (c *Client) describe(ctx context.Context, region string, page, size int) ([
 	return out, parsed.TotalCount, nil
 }
 
+// maxResponseBytes 单个阿里云响应的读取上限。分页 PageSize=100 时单页响应
+// 只有几百 KB，4MB 是异常检测线：超过即说明上游行为异常（或未来有人调大
+// 分页），拒绝处理而不是把未知体积读进内存。
+const maxResponseBytes = 4 << 20
+
 // call signs and posts one RPC request and returns the raw body of a healthy response.
 func (c *Client) call(ctx context.Context, host string, action map[string]string) ([]byte, error) {
 	params := map[string]string{
@@ -102,9 +107,12 @@ func (c *Client) call(ctx context.Context, host string, action map[string]string
 		return nil, err
 	}
 	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("阿里云响应超过 %dMB 上限，已拒绝处理", maxResponseBytes>>20)
 	}
 
 	var env apiEnvelope
