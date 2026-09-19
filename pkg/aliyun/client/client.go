@@ -15,22 +15,8 @@ import (
 	"local-ecs-app/pkg/aliyun/rpc"
 )
 
-type (
-	Config      = model.Config
-	Instance    = model.Instance
-	PublicAsset = model.PublicAsset
-	Identity    = model.Identity
-)
-
-var ErrNoSettings = model.ErrNoSettings
-
-func MatchIdentity(ident Identity, list []Instance) (Instance, string, string, bool) {
-	return model.MatchIdentity(ident, list)
-}
-
-func MonitorName(ident Identity) string { return model.MonitorName(ident) }
-
-func RegionSet(list []Instance) []string { return model.RegionSet(list) }
+// client 是纯 HTTP 客户端：签名、分页、全地域并发枚举。
+// 领域类型与匹配逻辑在 model 包，上层（service）直接引用 model，不经此处转发。
 
 type Client struct {
 	cfg  model.Config

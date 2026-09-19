@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 
+	"local-ecs-app/pkg/aliyun/model"
 	"local-ecs-app/pkg/app/service"
 )
 
@@ -15,6 +17,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// fail 统一错误出口：配置缺失是调用方问题（400），其余视为上游/阿里云故障（502）。
+// extra 里的键会并入响应体（如 matched:false / ok:false），保持前端契约不变。
+func fail(w http.ResponseWriter, err error, extra map[string]any) {
+	status := http.StatusBadGateway
+	if errors.Is(err, service.ErrNoSettings) {
+		status = http.StatusBadRequest
+	}
+	resp := map[string]any{"error": err.Error()}
+	for k, v := range extra {
+		resp[k] = v
+	}
+	writeJSON(w, status, resp)
+}
+
 func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -22,19 +38,20 @@ func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 	cfg, err := configFromRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"matched": false, "error": err.Error()})
+		fail(w, err, map[string]any{"matched": false})
 		return
 	}
-	ident := service.Identity{Instance: r.URL.Query().Get("q")}
-	if r.Body != nil && r.Method != http.MethodGet {
-		_ = json.NewDecoder(r.Body).Decode(&ident)
+	var ident service.Identity
+	if err := json.NewDecoder(r.Body).Decode(&ident); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"matched": false, "error": "无效的请求体"})
+		return
 	}
 	asset, ok, note, err := a.resolver.Resolve(r.Context(), cfg, ident)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"matched": false, "error": err.Error()})
+		fail(w, err, map[string]any{"matched": false})
 		return
 	}
-	resp := map[string]any{"matched": ok, "monitorName": a.resolver.MonitorName(ident)}
+	resp := map[string]any{"matched": ok, "monitorName": model.MonitorName(ident)}
 	if note != "" {
 		resp["note"] = note
 	}
@@ -47,7 +64,7 @@ func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
 	cfg, err := configFromRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		fail(w, err, nil)
 		return
 	}
 	var req struct {
@@ -59,7 +76,7 @@ func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.resolver.Enrich(r.Context(), cfg, req.Identities)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		fail(w, err, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"instances": out})
@@ -68,12 +85,12 @@ func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleTest(w http.ResponseWriter, r *http.Request) {
 	cfg, err := configFromRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		fail(w, err, map[string]any{"ok": false})
 		return
 	}
 	n, regions, err := a.resolver.Test(r.Context(), cfg)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
+		fail(w, err, map[string]any{"ok": false})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": n, "regions": regions})

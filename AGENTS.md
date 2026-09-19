@@ -40,7 +40,7 @@ docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允
 ```
 
 - `grafana-data` 命名卷持久化 grafana.db：`--force-recreate`/`restart` 不丢库，`docker compose down -v` 才删。
-- 改 `plugin.json` 后必须重建 + 重启 Grafana。UI 行为验证用无头浏览器（CDP :9222，容器内访问宿主机用 `http://172.17.0.1:3000`），skill 见 `~/.agents/skills/playwright-browser/`（现成脚本：`~/.zcode/tools/pw-browser/` 下 `rbac-regression.js`、`rbac-panel-menu.js`、`grafana-menu-check.js`）。
+- 改 `plugin.json` 后必须重建 + 重启 Grafana。UI 行为验证用无头浏览器（CDP :9222，容器内访问宿主机用 `http://172.17.0.1:3000`），skill 见 `~/.agents/skills/playwright-browser/`（容器删了也没关系，skill 的 ensure 脚本幂等重建；现成脚本：`~/.zcode/tools/pw-browser/` 下 `grafana-menu-check.js`、`rbac-panel-menu.js`——后者自建测试 dashboard，可直接跑）。
 - 权限回归对照实例：`docker compose -f docker-compose.yaml -f docker-compose.viewer.yaml up -d grafana-viewer`（3001 端口，匿名 Viewer + 内置 admin 登录，可用 Admin API 建真实用户；其库故意不持久，测完 down 掉归零）。
 
 ## 架构分层
