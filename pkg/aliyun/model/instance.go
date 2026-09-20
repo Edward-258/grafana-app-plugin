@@ -21,6 +21,11 @@ type Instance struct {
 	PublicIPs    []string
 	ZoneID       string
 	RegionID     string
+	// 租期信息：CreationTime 兼作租赁起点（近似口径，续费不更新）；
+	// ExpiredTime 仅 PrePaid 有值；原始 UTC ISO 字符串原样透传。
+	CreationTime string
+	ExpiredTime  string
+	ChargeType   string
 }
 
 // PublicAsset is the payload returned to the plugin UI. No addresses.
@@ -33,6 +38,9 @@ type PublicAsset struct {
 	MemoryGiB    int    `json:"memoryGiB"`
 	ZoneID       string `json:"zoneId,omitempty"`
 	RegionID     string `json:"regionId,omitempty"`
+	CreationTime string `json:"creationTime,omitempty"`
+	ExpiredTime  string `json:"expiredTime,omitempty"`
+	ChargeType   string `json:"chargeType,omitempty"`
 }
 
 func (i Instance) Public() PublicAsset {
@@ -45,6 +53,9 @@ func (i Instance) Public() PublicAsset {
 		MemoryGiB:    i.MemoryGiB,
 		ZoneID:       i.ZoneID,
 		RegionID:     i.RegionID,
+		CreationTime: i.CreationTime,
+		ExpiredTime:  i.ExpiredTime,
+		ChargeType:   i.ChargeType,
 	}
 }
 

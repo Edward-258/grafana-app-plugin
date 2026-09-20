@@ -15,10 +15,38 @@ export type EcsAsset = {
   memoryGiB: number;
   zoneId?: string;
   regionId?: string;
+  creationTime?: string;
+  expiredTime?: string;
+  chargeType?: string;
   monitorName?: string;
   matched?: boolean;
   note?: string;
 };
+
+// 阿里云 ECS 时间为分钟精度 UTC（yyyy-MM-ddTHH:mmZ，无秒），
+// 补秒归一后转本地时区展示；解析失败原样返回便于排查。
+export function fmtTime(iso?: string): string {
+  if (!iso) {
+    return '—';
+  }
+  const normalized = /T\d{2}:\d{2}Z$/.test(iso) ? iso.replace(/Z$/, ':00Z') : iso;
+  const d = new Date(normalized);
+  if (isNaN(d.getTime())) {
+    return iso;
+  }
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function chargeLabel(t?: string): string {
+  if (t === 'PrePaid') {
+    return '包年包月';
+  }
+  if (t === 'PostPaid') {
+    return '按量付费';
+  }
+  return t || '—';
+}
 
 type ResolveResponse = {
   matched: boolean;
@@ -75,6 +103,18 @@ export function EcsFields({ instance }: { instance: EcsAsset }) {
       </dd>
       <dt>名称</dt>
       <dd>{instance.instanceName || instance.hostName || instance.monitorName || '—'}</dd>
+      <dt>计费方式</dt>
+      <dd>{chargeLabel(instance.chargeType)}</dd>
+      <dt>创建时间</dt>
+      <dd>{fmtTime(instance.creationTime)}</dd>
+      <dt>到期时间</dt>
+      <dd>
+        {instance.chargeType === 'PostPaid' ? (
+          <span className={styles.muted}>按量付费无固定到期</span>
+        ) : (
+          fmtTime(instance.expiredTime)
+        )}
+      </dd>
     </dl>
   );
 }

@@ -22,6 +22,9 @@ type rawInstance struct {
 	Memory          int    `json:"Memory"`
 	ZoneId          string `json:"ZoneId"`
 	RegionId        string `json:"RegionId"`
+	CreationTime    string `json:"CreationTime"`
+	ExpiredTime     string `json:"ExpiredTime"`
+	ChargeType      string `json:"InstanceChargeType"`
 	InnerIpAddress  ipBag  `json:"InnerIpAddress"`
 	PublicIpAddress ipBag  `json:"PublicIpAddress"`
 	VpcAttributes   vpcBag `json:"VpcAttributes"`
@@ -56,6 +59,11 @@ func (r rawInstance) toInstance() model.Instance {
 		PublicIPs:    pub,
 		ZoneID:       r.ZoneId,
 		RegionID:     r.RegionId,
+		// 时间保持阿里云原始格式（yyyy-MM-ddTHH:mmZ，UTC 分钟精度）透传，
+		// 解析和本地时区展示留给前端；StartTime（开机时间）与租期无关，不采。
+		CreationTime: r.CreationTime,
+		ExpiredTime:  r.ExpiredTime,
+		ChargeType:   r.ChargeType,
 	}
 }
 
