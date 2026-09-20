@@ -55,19 +55,14 @@ func NewResolver() *Resolver {
 	}}
 }
 
-// Resolve maps one Prometheus identity to the ECS the AK can see. Matching is
-// strict: a weak identifier hitting several instances stays unmatched and the
-// note says why.
+// Resolve maps one Prometheus identity to the ECS the AK can see——Enrich 的
+// 单条封装，匹配语义（严格唯一命中、歧义带 note）与列表路径同源。
 func (r *Resolver) Resolve(ctx context.Context, cfg Config, ident Identity) (PublicAsset, bool, string, error) {
-	list, err := r.instances(ctx, cfg)
-	if err != nil {
+	rows, err := r.Enrich(ctx, cfg, []Identity{ident})
+	if err != nil || len(rows) == 0 {
 		return PublicAsset{}, false, "", err
 	}
-	inst, _, note, ok := model.MatchIdentity(ident, list)
-	if !ok {
-		return PublicAsset{}, false, note, nil
-	}
-	return inst.Public(), true, "", nil
+	return rows[0].PublicAsset, rows[0].Matched, rows[0].Note, nil
 }
 
 func (r *Resolver) Enrich(ctx context.Context, cfg Config, identities []Identity) ([]Enriched, error) {
