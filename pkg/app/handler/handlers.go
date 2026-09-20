@@ -31,10 +31,6 @@ func fail(w http.ResponseWriter, err error, extra map[string]any) {
 	writeJSON(w, status, resp)
 }
 
-func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
 func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 	cfg, err := configFromRequest(r)
 	if err != nil {

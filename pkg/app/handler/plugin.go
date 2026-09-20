@@ -31,7 +31,6 @@ type App struct {
 func NewApp(_ context.Context, _ backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	a := &App{resolver: service.NewResolver()}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", a.handleHealth)
 	mux.HandleFunc("/ecs/enrich", a.requireAction(actionRead, a.handleEnrich))
 	mux.HandleFunc("/ecs/resolve", a.requireAction(actionRead, a.handleResolve))
 	mux.HandleFunc("/ecs/ak", a.requireAction(actionRead, a.handleAK))
@@ -44,7 +43,7 @@ func (a *App) Dispose() {}
 
 func (a *App) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
 	cfg, err := configFrom(req.PluginContext)
-	if err != nil || cfg.AccessKeyID == "" || cfg.AccessKeySecret == "" {
+	if err != nil { // AK 未配置时 configFrom 已返回 ErrNoSettings
 		return &backend.CheckHealthResult{
 			Status:  backend.HealthStatusUnknown,
 			Message: "未配置 AccessKey",
