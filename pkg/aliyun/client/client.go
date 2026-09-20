@@ -35,6 +35,9 @@ func (c *Client) endpoint(region string) string {
 }
 
 // List paginates DescribeInstances within one region.
+// 上限 20 页 × 100 = 单地域最多收集 2000 台，超出会静默截断——轻量内部
+// 工具的有意取舍（2026-09 拍板不处理）；若将来单地域逼近千台，把此处
+// 改成超限报错以守住"禁止部分结果"红线。
 func (c *Client) List(ctx context.Context, region string) ([]model.Instance, error) {
 	var all []model.Instance
 	for page := 1; page <= 20; page++ {

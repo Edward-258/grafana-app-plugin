@@ -120,6 +120,7 @@ RBAC action 字符串天然要出现在 plugin.json（声明）、Go（执行）
 4. 若走出本机：决定私有签名 + 是否改 plugin id（见 §7）。
 5. ~~E2E 固化~~ 部分完成：`~/.zcode/tools/pw-browser/` 已有 rbac-regression / rbac-panel-menu / grafana-menu-check 回归脚本，可按需扩展成正式套件。
 6. 可选锦上添花：Magefile 跨平台构建、LICENSE、screenshots、`state` 字段、React.lazy 分页。
+7. ~~Resolver 缓存改 stale-while-revalidate~~ ✅ 2026-09-21 已实施（resolver.go）：三岔逻辑（新鲜纯内存 / 过期回旧值+单飞后台刷新 / 超 30 分钟硬上限退化为同步刷新保证错误可见）；后台刷新用 `context.Background`（不能用请求 ctx，请求返回即取消）；刷新失败保留旧快照、清单飞标记、下次请求重试；fetch 函数可注入（resolver_test.go 覆盖冷阻塞/新鲜命中/过期回旧/10 并发单飞/硬上限/失败重试六条路径）。实测：冷 ~3.8s（含建连），热 3.7ms。已否决项见前文（落盘缓存/心跳轮询/地域长缓存/跳地域）。
 
 ## 11. 项目验证策略（持续更新）
 

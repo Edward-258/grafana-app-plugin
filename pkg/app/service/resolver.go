@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+
 	"local-ecs-app/pkg/aliyun/client"
 	"local-ecs-app/pkg/aliyun/model"
 )
@@ -25,19 +27,32 @@ type Enriched struct {
 	Matched     bool   `json:"matched"`
 }
 
+const (
+	// cacheTTL 缓存新鲜期：窗口内的请求纯内存命中，不触任何拉取。
+	cacheTTL = 5 * time.Minute
+	// hardStaleCap 硬陈旧上限：超过后不再回旧值、退化为同步刷新，保证
+	// 持续失败最终以错误暴露，而不是无限端古董快照。
+	hardStaleCap = 30 * time.Minute
+)
+
 type Resolver struct {
 	mu    sync.Mutex
 	cache *ecsCache
+	// fetch 抽象"全量拉取"动作以便测试注入；生产实现是阿里云全地域扫描。
+	fetch func(ctx context.Context, cfg Config) ([]model.Instance, error)
 }
 
 type ecsCache struct {
-	key       string
-	at        time.Time
-	instances []model.Instance
+	key        string
+	at         time.Time
+	instances  []model.Instance
+	refreshing bool // 单飞标记：一轮后台刷新在飞时不重复触发
 }
 
 func NewResolver() *Resolver {
-	return &Resolver{}
+	return &Resolver{fetch: func(ctx context.Context, cfg Config) ([]model.Instance, error) {
+		return client.New(cfg).ListAll(ctx)
+	}}
 }
 
 // Resolve maps one Prometheus identity to the ECS the AK can see. Matching is
@@ -78,7 +93,7 @@ func (r *Resolver) Enrich(ctx context.Context, cfg Config, identities []Identity
 // Test returns how many instances the AK can see, across how many regions.
 // 故意绕过缓存直连阿里云：连通性测试要验证的是当下的真实可达性。
 func (r *Resolver) Test(ctx context.Context, cfg Config) (int, int, error) {
-	list, err := client.New(cfg).ListAll(ctx)
+	list, err := r.fetch(ctx, cfg)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -91,24 +106,60 @@ func (r *Resolver) Ensure(ctx context.Context, cfg Config) error {
 	return err
 }
 
-// instances caches the full multi-region picture per AccessKey for a few
-// minutes; the first call after expiry pays one DescribeRegions plus one
-// DescribeInstances sweep per region.
+// instances 是 stale-while-revalidate 的核心，三岔：
+//   - 新鲜（< TTL）→ 纯内存命中；
+//   - 过期但在硬上限内 → 立即返回旧快照，必要时单飞触发后台刷新；
+//   - 超过硬上限或无缓存 → 同步全量刷新，请求方等待、错误如实返回。
+//
+// 完整性语义不变：每次刷新仍是全地域扫描、任一地域失败作废，绝不端
+// 半份结果；后台刷新失败只是"继续用上一份完整快照"，下次请求再试。
 func (r *Resolver) instances(ctx context.Context, cfg Config) ([]model.Instance, error) {
 	r.mu.Lock()
-	if r.cache != nil && r.cache.key == cfg.AccessKeyID && time.Since(r.cache.at) < 5*time.Minute {
-		out := r.cache.instances
-		r.mu.Unlock()
-		return out, nil
+	if c := r.cache; c != nil && c.key == cfg.AccessKeyID {
+		age := time.Since(c.at)
+		if age < cacheTTL {
+			r.mu.Unlock()
+			return c.instances, nil
+		}
+		if age < hardStaleCap {
+			if !c.refreshing {
+				c.refreshing = true
+				go r.backgroundRefresh(cfg)
+			}
+			r.mu.Unlock()
+			return c.instances, nil
+		}
+		// 超过硬上限：数据太旧，落到同步刷新
 	}
 	r.mu.Unlock()
+	return r.refresh(ctx, cfg)
+}
 
-	list, err := client.New(cfg).ListAll(ctx)
+func (r *Resolver) refresh(ctx context.Context, cfg Config) ([]model.Instance, error) {
+	list, err := r.fetch(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	r.store(cfg, list)
 	return list, nil
+}
+
+// backgroundRefresh 必须用 context.Background：触发它的请求一旦返回，
+// 其 ctx 即被取消——用请求 ctx 做后台刷新会被半路掐死（SWR 经典坑）。
+func (r *Resolver) backgroundRefresh(cfg Config) {
+	list, err := r.fetch(context.Background(), cfg)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c := r.cache
+	if c == nil || c.key != cfg.AccessKeyID {
+		return // 缓存槽已因换 AK 重置，本次结果作废
+	}
+	if err != nil {
+		c.refreshing = false // 放行下一次触发
+		log.DefaultLogger.Error("后台刷新资产列表失败，继续使用旧快照", "error", err)
+		return
+	}
+	r.cache = &ecsCache{key: cfg.AccessKeyID, at: time.Now(), instances: list}
 }
 
 func (r *Resolver) store(cfg Config, list []model.Instance) {
