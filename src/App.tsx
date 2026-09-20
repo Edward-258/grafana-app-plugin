@@ -5,7 +5,7 @@ import { PluginPage, getBackendSrv } from '@grafana/runtime';
 import { Alert, FilterInput, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
 import ConfigPage from './ConfigPage';
-import { EcsAsset, EcsFields } from './EcsInfo';
+import { EcsAsset, EcsFields, fmtTime } from './EcsInfo';
 import { identitiesFromPrometheus, loadSettings } from './prom';
 
 type ListResponse = {
@@ -67,7 +67,7 @@ export default function App({ query }: AppProps) {
       return instances;
     }
     return instances.filter((i) =>
-      [i.instanceId, i.instanceName, i.hostName, i.instanceType, i.regionId, i.monitorName]
+      [i.instanceId, i.instanceName, i.hostName, i.instanceType, i.regionId, i.monitorName, i.creationTime, i.expiredTime]
         .join(' ')
         .toLowerCase()
         .includes(q)
@@ -117,6 +117,8 @@ export default function App({ query }: AppProps) {
                   <th>名称</th>
                   <th>规格</th>
                   <th>地域</th>
+                  <th>创建时间</th>
+                  <th>到期时间</th>
                   <th>vCPU</th>
                   <th>内存</th>
                 </tr>
@@ -131,8 +133,10 @@ export default function App({ query }: AppProps) {
                     </td>
                     <td>{row.instanceName || row.hostName || '—'}</td>
                     <td>{row.instanceType || '—'}</td>
-                    <td>{row.regionId || '—'}</td>
-                    <td>{row.cpu || '—'}</td>
+                  <td>{row.regionId || '—'}</td>
+                  <td>{fmtTime(row.creationTime)}</td>
+                  <td>{row.chargeType === 'PostPaid' ? '按量付费' : fmtTime(row.expiredTime)}</td>
+                  <td>{row.cpu || '—'}</td>
                     <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
                   </tr>
                 ))}
