@@ -64,6 +64,9 @@ func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Identities []service.Identity `json:"identities"`
+		// refresh=true：绕过缓存强制实时拉取（前端刷新键语义），仍走同一
+		// 完整性约束：全地域枚举、任一地域失败整体失败。
+		Refresh bool `json:"refresh"`
 	}
 	if !decodeBody(w, r, &req) {
 		return
@@ -72,7 +75,7 @@ func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
 		fail(w, err, nil)
 		return
 	}
-	out, err := a.resolver.Enrich(r.Context(), cfg, req.Identities)
+	out, err := a.resolver.Enrich(r.Context(), cfg, req.Identities, req.Refresh)
 	if err != nil {
 		fail(w, err, nil)
 		return
