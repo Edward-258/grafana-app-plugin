@@ -35,11 +35,14 @@ Grafana App 插件 `local-ecs-app`：阿里云 ECS 资产（ID/规格/地域）�
 ```bash
 npm run build                          # 生成 RBAC 常量 + 前端(webpack) + 后端(gox linux/amd64 → dist/gpx_ecs_linux_amd64)
 npm run lint                           # ESLint（@grafana/eslint-config）+ Prettier；lint:fix 自动修（scripts/、webpack.config.js 不参与）
+golangci-lint run ./...                # 后端 lint（v2.13.2，配置 .golangci.yml；旧版二进制无法分析 go 1.26）
 go vet ./... && go test ./...          # 后端（含 zz_generated 守护测试）
 npx tsc --noEmit                       # 前端类型（含 tests/）
 npm run e2e                            # Playwright e2e（tests/）：面板菜单扩展红线 + RBAC 拦截 + 页面导航
 docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允许未签名）
 ```
+
+- **CI（GitHub Actions，推到 origin 后自动跑）**：`.github/workflows/ci.yml` 双 job——build（prettier/eslint/tsc/golangci/go test/build）与 e2e（起主实例 + viewer 对照实例，浏览器本地启动跑全套 Playwright）；`is-compatible.yml` 用官方 levitate 查前端 API 弃用（PR 时跑）；`dependabot.yml` 周更依赖（gomod 只放行 plugin-sdk）。本地 e2e 是「CDP 容器浏览器 + 172.17.0.1」拓扑、CI 是「本地浏览器 + localhost」拓扑，靠 `PW_CDP_ENDPOINT`/`GRAFANA_*_URL` 环境变量切换（见 tests/fixtures.ts 头注），代码零改动。
 
 - `grafana-data` 命名卷持久化 grafana.db：`--force-recreate`/`restart` 不丢库，`docker compose down -v` 才删。
 - 改 `plugin.json` 后必须重建 + 重启 Grafana。**UI 行为验证首选 `npm run e2e`**（红线回归已固化成正式套件，跑 `panelMenu.spec.ts` 即浏览器断言菜单）；探索性调试仍可用 skill（CDP :9222，容器内访问宿主机用 `http://172.17.0.1:3000`）与 `~/.zcode/tools/pw-browser/` 下的临时脚本。e2e 拓扑注意：浏览器跑在 headless-shell 容器里，Node 侧用 `localhost`、浏览器侧用 `172.17.0.1`（见 `tests/fixtures.ts` 头注；`PW_CDP_ENDPOINT`/`GRAFANA_URL`/`GRAFANA_BROWSER_URL` 可覆盖）。

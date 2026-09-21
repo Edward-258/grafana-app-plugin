@@ -1,0 +1,8 @@
+# 依官方 create-plugin 模板（templates/backend-app/.golangci.yml）
+version: '2'
+linters:
+  exclusions:
+    paths:
+      - node_modules
+      # 生成物（gen-permissions.js 产物），不参与 lint
+      - zz_generated\.go

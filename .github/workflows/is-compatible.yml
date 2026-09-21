@@ -1,0 +1,39 @@
+# 前端 API 兼容性检查：依官方模板（templates/github/workflows/is-compatible.yml）。
+# 用 grafana/plugin-actions/is-compatible（levitate）检测插件是否用到新版 Grafana
+# 已弃用/移除的前端 API——11.6 → 12/13 升级前的第一道机器检查
+# （对照 docs/grafana-plugin-official-spec.md §9 迁移检查点）。
+
+name: Latest Grafana API compatibility check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  compatibilitycheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: npm run build:frontend
+
+      - name: Compatibility check
+        uses: grafana/plugin-actions/is-compatible@is-compatible/v1.0.3
+        with:
+          module: ./src/module.tsx
+          comment-pr: 'no'
+          fail-if-incompatible: 'yes'

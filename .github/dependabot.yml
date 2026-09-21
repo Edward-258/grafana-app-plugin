@@ -1,0 +1,60 @@
+# 依官方 create-plugin 模板（templates/github/dependabot.yml）适配：
+# - 移除 jest 单测分组与 plugin-e2e 排除（本项目未用）。
+# - gomod 只放行 grafana-plugin-sdk-go（模板约定：插件后端其余依赖随 SDK 走）。
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    # 缓冲 5 天再升，降低供应链攻击窗口（模板同款策略）
+    cooldown:
+      default-days: 5
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      eslint:
+        patterns:
+          - '@grafana/eslint-config'
+          - 'eslint*'
+          - '@typescript-eslint/*'
+          - '@stylistic/*'
+      grafana:
+        patterns:
+          - '@grafana/*'
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+      react:
+        patterns:
+          - react
+          - react-dom
+          - '@types/react'
+          - '@types/react-dom'
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(ci)
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    allow:
+      - dependency-name: github.com/grafana/grafana-plugin-sdk-go
+        dependency-type: all
+    commit-message:
+      prefix: chore
+      include: scope
