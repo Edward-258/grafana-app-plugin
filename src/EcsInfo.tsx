@@ -159,7 +159,8 @@ export function EcsModalBody({ onDismiss }: { onDismiss?: () => void }) {
     <div>
       {!query && (
         <Alert title="没有设备变量" severity="info">
-          当前 Dashboard 里找不到 instance / node / host 等变量。插件用 Prometheus 的实例标识对齐 ECS，不需要把 IP 写进 scrape target。
+          当前 Dashboard 里找不到 instance / node / host 等变量。插件用 Prometheus 的实例标识对齐 ECS，不需要把 IP 写进
+          scrape target。
         </Alert>
       )}
       {error && (
