@@ -109,7 +109,7 @@ func (c *Client) call(ctx context.Context, host string, action map[string]string
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, err

@@ -1,0 +1,127 @@
+# CI：依官方 create-plugin 模板（templates/github/workflows/ci.yml）适配。
+# 与模板的差异：
+# - 拆两个 job 并行：build（lint/typecheck/build/go）与 e2e（双 Grafana 实例 + Playwright）。
+# - 模板的 jest test:ci 前端单测尚未引入（差距清单第 4 批次），此处只跑已有的关卡。
+# - 后端构建走本项目 npm script（gen-permissions + webpack + go build），非模板的 mage。
+# - e2e 环境变量见 tests/fixtures.ts：CI 上 chromium 依赖齐全，浏览器本地启动
+#   （PW_CDP_ENDPOINT=local），Node 侧与浏览器侧统一 localhost——与本地 WSL 的
+#   CDP 容器 + 172.17.0.1 网桥拓扑互为镜像，靠环境变量切换，代码零改动。
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - infra
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Lint, typecheck, build, backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npx prettier --check .
+
+      - name: Check types
+        run: npm run typecheck
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint backend
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        with:
+          # 钉在与本地验证过的版本（golangci-lint 用旧 Go 构建时无法分析 go 1.26）
+          version: v2.13.2
+          args: ./...
+
+      - name: Vet backend
+        run: go vet ./...
+
+      - name: Backend tests
+        run: go test ./...
+
+      - name: Build (RBAC 常量生成 + 前端 + 后端)
+        run: npm run build
+
+  e2e:
+    name: Playwright e2e（主实例 + viewer 对照实例）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin into dist/
+        run: npm run build
+
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Grafana instances
+        run: |
+          docker compose up -d grafana
+          docker compose -f docker-compose.yaml -f docker-compose.viewer.yaml up -d grafana-viewer
+
+      - name: Wait for Grafana instances
+        run: |
+          for port in 3000 3001; do
+            echo "Waiting for Grafana on :$port"
+            timeout 180 bash -c "until curl -fsS http://localhost:$port/api/health >/dev/null; do sleep 2; done"
+          done
+
+      - name: Run e2e tests
+        env:
+          PW_CDP_ENDPOINT: local
+          GRAFANA_URL: http://localhost:3000
+          GRAFANA_BROWSER_URL: http://localhost:3000
+          GRAFANA_VIEWER_URL: http://localhost:3001
+          GRAFANA_VIEWER_BROWSER_URL: http://localhost:3001
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

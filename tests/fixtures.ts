@@ -1,6 +1,5 @@
 import { chromium, expect, test as base, type Browser, type Page } from '@playwright/test';
 
-
 /*
  * 浏览器跑在常驻 headless-shell 容器里（CDP :9222，见 AGENTS.md），宿主机（WSL）缺 chromium
  * 系统库无法本地 launch。因此地址拆成两侧：
@@ -18,11 +17,13 @@ type BrowserGoto = {
 
 export const test = base.extend<BrowserGoto & { browser: Browser }>({
   // 覆盖默认 browser fixture：连常驻 CDP 容器而非本地 launch（端点可用 PW_CDP_ENDPOINT 覆盖）；
-  // teardown 的 close() 对 CDP 连接只断连、不杀容器浏览器。
+  // PW_CDP_ENDPOINT=local 时本地 launch——CI（.github/workflows/ci.yml）上 chromium 依赖齐全用这条路径。
+  // teardown 的 close() 对 CDP 连接只断连、不杀容器浏览器；对本地 launch 则正常回收。
   browser: [
     async ({}, use) => {
-      const endpoint = process.env.PW_CDP_ENDPOINT || 'http://127.0.0.1:9222';
-      const browser = await chromium.connectOverCDP(endpoint, { timeout: 30_000 });
+      const endpoint = process.env.PW_CDP_ENDPOINT ?? 'http://127.0.0.1:9222';
+      const browser =
+        endpoint === 'local' ? await chromium.launch() : await chromium.connectOverCDP(endpoint, { timeout: 30_000 });
       await use(browser);
       await browser.close();
     },

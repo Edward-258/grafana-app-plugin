@@ -22,7 +22,7 @@ const (
 	DefaultMaxIdentities = 2000
 )
 
-var ErrTooManyIdentities = errors.New("Prometheus 标识数量超过上限")
+var ErrTooManyIdentities = errors.New("prometheus 标识数量超过上限")
 
 // decodeBody 统一请求体闸：先套字节上限再解码，超限 413、坏格式 400。
 // 返回 false 时响应已写完，调用方直接 return。

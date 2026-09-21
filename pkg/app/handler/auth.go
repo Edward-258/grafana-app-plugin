@@ -10,6 +10,7 @@ import (
 	authzcache "github.com/grafana/authlib/cache"
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
+	"github.com/grafana/grafana-plugin-sdk-go/config"
 )
 
 // RBAC action 常量、PluginID 与 roleActions 回退映射全部由 zz_generated.go
@@ -23,7 +24,7 @@ const idTokenHeader = "X-Grafana-Id"
 func (a *App) authZClient(r *http.Request) (*authz.EnforcementClientImpl, error) {
 	ctx := r.Context()
 	logger := log.DefaultLogger.FromContext(ctx)
-	cfg := backend.GrafanaConfigFromContext(ctx)
+	cfg := config.GrafanaConfigFromContext(ctx)
 
 	saToken, err := cfg.PluginAppClientSecret()
 	if err != nil || saToken == "" {
