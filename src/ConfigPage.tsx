@@ -3,7 +3,17 @@ import { lastValueFrom } from 'rxjs';
 import { css } from '@emotion/css';
 import { AppPluginMeta, GrafanaTheme2, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { DataSourcePicker, getBackendSrv, hasPermission } from '@grafana/runtime';
-import { Alert, Button, Field, FieldSet, IconButton, Input, LoadingPlaceholder, SecretInput, useStyles2 } from '@grafana/ui';
+import {
+  Alert,
+  Button,
+  Field,
+  FieldSet,
+  IconButton,
+  Input,
+  LoadingPlaceholder,
+  SecretInput,
+  useStyles2,
+} from '@grafana/ui';
 import pluginJson from './plugin.json';
 import { ACTION_REVEAL, ACTION_WRITE } from './permissions.gen';
 import { queryPrometheus } from './prom';
@@ -177,7 +187,11 @@ export default function ConfigPage(_props: Props = {}) {
           description="默认 instance。与 Node Exporter Full 上的 Instance 变量一致即可。"
           className={styles.gap}
         >
-          <Input width={60} value={instanceLabel} onChange={(e: ChangeEvent<HTMLInputElement>) => setInstanceLabel(e.target.value)} />
+          <Input
+            width={60}
+            value={instanceLabel}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setInstanceLabel(e.target.value)}
+          />
         </Field>
       </FieldSet>
 
@@ -279,7 +293,13 @@ export default function ConfigPage(_props: Props = {}) {
               保存
             </Button>
             {canReveal && (
-              <Button type="button" variant="secondary" className={styles.btn} onClick={() => void onTest()} disabled={testing}>
+              <Button
+                type="button"
+                variant="secondary"
+                className={styles.btn}
+                onClick={() => void onTest()}
+                disabled={testing}
+              >
                 测试连接
               </Button>
             )}

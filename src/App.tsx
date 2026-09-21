@@ -67,7 +67,16 @@ export default function App({ query }: AppProps) {
       return instances;
     }
     return instances.filter((i) =>
-      [i.instanceId, i.instanceName, i.hostName, i.instanceType, i.regionId, i.monitorName, i.creationTime, i.expiredTime]
+      [
+        i.instanceId,
+        i.instanceName,
+        i.hostName,
+        i.instanceType,
+        i.regionId,
+        i.monitorName,
+        i.creationTime,
+        i.expiredTime,
+      ]
         .join(' ')
         .toLowerCase()
         .includes(q)
@@ -133,10 +142,10 @@ export default function App({ query }: AppProps) {
                     </td>
                     <td>{row.instanceName || row.hostName || '—'}</td>
                     <td>{row.instanceType || '—'}</td>
-                  <td>{row.regionId || '—'}</td>
-                  <td>{fmtTime(row.creationTime)}</td>
-                  <td>{row.chargeType === 'PostPaid' ? '按量付费' : fmtTime(row.expiredTime)}</td>
-                  <td>{row.cpu || '—'}</td>
+                    <td>{row.regionId || '—'}</td>
+                    <td>{fmtTime(row.creationTime)}</td>
+                    <td>{row.chargeType === 'PostPaid' ? '按量付费' : fmtTime(row.expiredTime)}</td>
+                    <td>{row.cpu || '—'}</td>
                     <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
                   </tr>
                 ))}

@@ -6,6 +6,7 @@
 ## 0. 我们踩过的坑（最高优先级记忆）
 
 ### 0.1 UI 扩展双登记契约
+
 代码里 `addLink()`/`addComponent()` 注册的扩展，**必须同时在 `plugin.json` 的 `extensions.addedLinks[]` / `addedComponents[]` 里声明**。官方原话：
 
 > "You must update your `plugin.json` metadata to list any registered extensions. **In future versions of Grafana, this will fail.**"
@@ -15,9 +16,11 @@
 - **任何改动 plugin.json 或 module.tsx 扩展注册的提交，必须跑浏览器断言验证菜单仍存在。**
 
 ### 0.2 addedLinks.title 最短 10 字符
+
 官方 schema 要求 `addedLinks[]` 每项 `title` minLength 10。当前 title "ECS 资产信息" 只有 8 字符，11.6 dev 模式未拒绝（功能正常），但**升级 Grafana 后若扩展再失联，第一个查这里**。稳妥写法：改为 10 字符以上（如 "查看 ECS 资产信息"）。
 
 ### 0.3 targets 两种写法都合法
+
 - 文档示例带 `/v1`：`grafana/dashboard/panel/menu/v1`
 - `PluginExtensionPoints.DashboardPanelMenu` 枚举值不带 `/v1`
 - Grafana 注册表会归一化，**用枚举常量最稳**（本项目现状）。
@@ -31,17 +34,17 @@
 
 ## 2. plugin.json 要点（App 相关）
 
-| 字段 | 说明 | 本项目 |
-|---|---|---|
-| `id` | 必须匹配 `^[0-9a-z]+-([0-9a-z]+-)?(app\|panel\|datasource)$` | `local-ecs-app` ✅ |
-| `preload` / `autoEnabled` | 随启加载 / 所有 org 启用并固定到导航 | true / true ✅ |
-| `info.version` / `info.updated` | `%VERSION%` / `%TODAY%` 占位符是官方 create-plugin 做法，构建时替换 | ✅ |
-| `includes[]` | page 支持 `role` / `action` / `addToNav` / `defaultNav` / `icon`；dashboard 用 `path` 指向 src 下 JSON，启用 App 时自动导入到 General 目录 | ✅ |
-| `backend` + `executable` | executable 是二进制前缀，实际找 `gpx_ecs_linux_amd64` 等 | ✅ |
-| `dependencies.grafanaDependency` | 写真正支持的下限；`addLink` 11.1 引入 | `>=11.1.0` ✅ |
-| `extensions.addedLinks[]` | `targets` + `title`(≥10字符) + `description` 必填 | ⚠️ title 长度 |
-| `state` | alpha/beta/stable，可选 | 未设置 |
-| `info.links` | 留空发布时会被打回（内部使用无所谓） | 未设置 |
+| 字段                             | 说明                                                                                                                                       | 本项目             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| `id`                             | 必须匹配 `^[0-9a-z]+-([0-9a-z]+-)?(app\|panel\|datasource)$`                                                                               | `local-ecs-app` ✅ |
+| `preload` / `autoEnabled`        | 随启加载 / 所有 org 启用并固定到导航                                                                                                       | true / true ✅     |
+| `info.version` / `info.updated`  | `%VERSION%` / `%TODAY%` 占位符是官方 create-plugin 做法，构建时替换                                                                        | ✅                 |
+| `includes[]`                     | page 支持 `role` / `action` / `addToNav` / `defaultNav` / `icon`；dashboard 用 `path` 指向 src 下 JSON，启用 App 时自动导入到 General 目录 | ✅                 |
+| `backend` + `executable`         | executable 是二进制前缀，实际找 `gpx_ecs_linux_amd64` 等                                                                                   | ✅                 |
+| `dependencies.grafanaDependency` | 写真正支持的下限；`addLink` 11.1 引入                                                                                                      | `>=11.1.0` ✅      |
+| `extensions.addedLinks[]`        | `targets` + `title`(≥10字符) + `description` 必填                                                                                          | ⚠️ title 长度      |
+| `state`                          | alpha/beta/stable，可选                                                                                                                    | 未设置             |
+| `info.links`                     | 留空发布时会被打回（内部使用无所谓）                                                                                                       | 未设置             |
 
 ## 3. 后端 App 规范
 
@@ -115,17 +118,18 @@ RBAC action 字符串天然要出现在 plugin.json（声明）、Go（执行）
 ## 10. 差距清单（按处理优先级）
 
 1. ⚠️ 扩展 title 改为 ≥10 字符（"查看 ECS 资产信息"），消除升级隐患。
-2. 补 `CHANGELOG.md`（官方 Required，成本最低）。
+2. ~~补 `CHANGELOG.md`~~ ✅ 2026-09-21 已补（连同 Apache-2.0 LICENSE）。
 3. ~~资源端点加角色保护~~ ✅ 2026-09 已完成（见 §8）。
 4. 若走出本机：决定私有签名 + 是否改 plugin id（见 §7）。
-5. ~~E2E 固化~~ 部分完成：`~/.zcode/tools/pw-browser/` 已有 rbac-regression / rbac-panel-menu / grafana-menu-check 回归脚本，可按需扩展成正式套件。
-6. 可选锦上添花：Magefile 跨平台构建、LICENSE、screenshots、`state` 字段、React.lazy 分页。
+5. ~~E2E 固化~~ ✅ 2026-09-21 已固化为正式 Playwright 套件（`tests/` + `playwright.config.ts`，`npm run e2e`）：面板菜单扩展红线（panelMenu.spec.ts，含弹窗断言）、匿名 Viewer RBAC 拦截（rbac.spec.ts，:3001 对照实例，未起自动 skip）、根页/资产页导航（appNavigation.spec.ts）。与官方模板的差异：模板的 `@grafana/plugin-e2e` fixtures 强制 Node 侧与浏览器侧同源，本项目浏览器在 CDP 容器里（跨网段）用不了，故用纯 `@playwright/test` + 自建 `goto` fixture（Node 走 localhost、浏览器走 172.17.0.1，见 tests/fixtures.ts 头注）。`~/.zcode/tools/pw-browser/` 脚本保留作探索性调试。
+6. ~~LICENSE~~ ✅ 2026-09-21 已补。其余锦上添花：Magefile 跨平台构建、screenshots、`state` 字段、React.lazy 分页。
 7. ~~Resolver 缓存改 stale-while-revalidate~~ ✅ 2026-09-21 已实施（resolver.go）：三岔逻辑（新鲜纯内存 / 过期回旧值+单飞后台刷新 / 超 30 分钟硬上限退化为同步刷新保证错误可见）；后台刷新用 `context.Background`（不能用请求 ctx，请求返回即取消）；刷新失败保留旧快照、清单飞标记、下次请求重试；fetch 函数可注入（resolver_test.go 覆盖冷阻塞/新鲜命中/过期回旧/10 并发单飞/硬上限/失败重试六条路径）。实测：冷 ~3.8s（含建连），热 3.7ms。已否决项见前文（落盘缓存/心跳轮询/地域长缓存/跳地域）。
+8. 工程化补齐（2026-09-21）：ESLint（`@grafana/eslint-config`，根 `eslint.config.mjs`，未迁 .config/ 脚手架）+ Prettier（`.prettierrc.js`/`.prettierignore`）已落地；`react-hooks/set-state-in-effect` 降为 warn（现有 fetch-on-effect 模式，重构另行处理）。CI workflow、Jest 前端单测、.golangci.yml 仍未做（模板对齐清单第 4/5 批次）。
 
 ## 11. 项目验证策略（持续更新）
 
 - Go：`go vet ./... && go test ./...`
-- 前端：`npx tsc --noEmit && npm run build`
-- **声明式契约（plugin.json、扩展注册）改动后：必须无头浏览器断言**（headless-shell 容器 CDP :9222 + playwright-core，见 ~/.agents/skills/playwright-browser/）。容器启动：`docker run -d --name headless-chrome --restart unless-stopped -p 127.0.0.1:9222:9222 chromedp/headless-shell --no-sandbox`；容器内访问宿主机 Grafana 用 `http://172.17.0.1:3000`。
-- **RBAC/权限改动回归**：起 viewer 对照实例（`docker-compose.viewer.yaml`，3001 匿名 Viewer + admin 登录），用 Admin API 建真实 Viewer 用户下结论；curl 对照 `/ecs/ak`（masked 无 full）与 `/ecs/test`（403）。
+- 前端：`npm run lint`（ESLint+Prettier）&& `npx tsc --noEmit && npm run build`
+- **声明式契约（plugin.json、扩展注册）改动后：跑 `npm run e2e`**（浏览器在 headless-shell 容器 CDP :9222 内，`panelMenu.spec.ts` 即浏览器断言菜单；探索性调试仍可用 ~/.agents/skills/playwright-browser/）。容器启动：`docker run -d --name headless-chrome --restart unless-stopped -p 127.0.0.1:9222:9222 chromedp/headless-shell --no-sandbox`；容器内访问宿主机 Grafana 用 `http://172.17.0.1:3000`（宿主机侧该地址不可达，Node 侧一律走 localhost——e2e 地址拆分见 tests/fixtures.ts）。
+- **RBAC/权限改动回归**：起 viewer 对照实例（`docker-compose.viewer.yaml`，3001 匿名 Viewer），跑 `npm run e2e` 的 viewer 项目；手工下结论时用 Admin API 建真实 Viewer 用户 + curl 对照 `/ecs/ak`（masked 无 full）与 `/ecs/test`（403）。
 - grafana.db 在 `grafana-data` 命名卷里，`--force-recreate` 不丢库（`down -v` 才删）——重建后无需重录 AK/数据源。

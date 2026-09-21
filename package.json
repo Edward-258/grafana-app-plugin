@@ -8,6 +8,10 @@
     "build:frontend": "webpack --env production",
     "build:backend": "PATH=\"$HOME/.local/go/bin:$HOME/go/bin:$PATH\" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags='-s -w' -o dist/gpx_ecs_linux_amd64 ./pkg",
     "dev": "webpack -w --env development",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --cache .",
+    "lint:fix": "npm run lint -- --fix && prettier --write --list-different .",
+    "e2e": "playwright test",
     "server": "docker compose up"
   },
   "dependencies": {
@@ -20,9 +24,20 @@
     "rxjs": "7.8.1"
   },
   "devDependencies": {
+    "@grafana/eslint-config": "^9.0.0",
+    "@playwright/test": "^1.62.1",
+    "@stylistic/eslint-plugin-ts": "^4.4.0",
     "@swc/core": "^1.11.0",
     "@types/react": "^18.3.0",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
     "copy-webpack-plugin": "^12.0.2",
+    "eslint": "^9.32.0",
+    "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-jsdoc": "^52.0.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "prettier": "^3.6.0",
     "swc-loader": "^0.2.6",
     "typescript": "^5.7.0",
     "webpack": "^5.97.0",
