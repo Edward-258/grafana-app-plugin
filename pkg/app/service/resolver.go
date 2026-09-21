@@ -58,15 +58,16 @@ func NewResolver() *Resolver {
 // Resolve maps one Prometheus identity to the ECS the AK can see——Enrich 的
 // 单条封装，匹配语义（严格唯一命中、歧义带 note）与列表路径同源。
 func (r *Resolver) Resolve(ctx context.Context, cfg Config, ident Identity) (PublicAsset, bool, string, error) {
-	rows, err := r.Enrich(ctx, cfg, []Identity{ident})
+	rows, err := r.Enrich(ctx, cfg, []Identity{ident}, false)
 	if err != nil || len(rows) == 0 {
 		return PublicAsset{}, false, "", err
 	}
 	return rows[0].PublicAsset, rows[0].Matched, rows[0].Note, nil
 }
 
-func (r *Resolver) Enrich(ctx context.Context, cfg Config, identities []Identity) ([]Enriched, error) {
-	list, err := r.instances(ctx, cfg)
+// Enrich 对齐标识与资产；force=true 时绕过缓存同步实时拉取（手动刷新语义）。
+func (r *Resolver) Enrich(ctx context.Context, cfg Config, identities []Identity, force bool) ([]Enriched, error) {
+	list, err := r.instances(ctx, cfg, force)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +98,7 @@ func (r *Resolver) Test(ctx context.Context, cfg Config) (int, int, error) {
 }
 
 func (r *Resolver) Ensure(ctx context.Context, cfg Config) error {
-	_, err := r.instances(ctx, cfg)
+	_, err := r.instances(ctx, cfg, false)
 	return err
 }
 
@@ -106,27 +107,32 @@ func (r *Resolver) Ensure(ctx context.Context, cfg Config) error {
 //   - 过期但在硬上限内 → 立即返回旧快照，必要时单飞触发后台刷新；
 //   - 超过硬上限或无缓存 → 同步全量刷新，请求方等待、错误如实返回。
 //
+// force=true 是第四条路：无视新鲜度直接同步全量拉取并回写缓存——手动刷新
+// 要的就是"实打实的一次实时请求"，缓存只用来兜普通读流量。
+//
 // 完整性语义不变：每次刷新仍是全地域扫描、任一地域失败作废，绝不端
 // 半份结果；后台刷新失败只是"继续用上一份完整快照"，下次请求再试。
-func (r *Resolver) instances(ctx context.Context, cfg Config) ([]model.Instance, error) {
-	r.mu.Lock()
-	if c := r.cache; c != nil && c.key == cfg.AccessKeyID {
-		age := time.Since(c.at)
-		if age < cacheTTL {
-			r.mu.Unlock()
-			return c.instances, nil
-		}
-		if age < hardStaleCap {
-			if !c.refreshing {
-				c.refreshing = true
-				go r.backgroundRefresh(cfg)
+func (r *Resolver) instances(ctx context.Context, cfg Config, force bool) ([]model.Instance, error) {
+	if !force {
+		r.mu.Lock()
+		if c := r.cache; c != nil && c.key == cfg.AccessKeyID {
+			age := time.Since(c.at)
+			if age < cacheTTL {
+				r.mu.Unlock()
+				return c.instances, nil
 			}
-			r.mu.Unlock()
-			return c.instances, nil
+			if age < hardStaleCap {
+				if !c.refreshing {
+					c.refreshing = true
+					go r.backgroundRefresh(cfg)
+				}
+				r.mu.Unlock()
+				return c.instances, nil
+			}
+			// 超过硬上限：数据太旧，落到同步刷新
 		}
-		// 超过硬上限：数据太旧，落到同步刷新
+		r.mu.Unlock()
 	}
-	r.mu.Unlock()
 	return r.refresh(ctx, cfg)
 }
 

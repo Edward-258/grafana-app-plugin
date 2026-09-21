@@ -9,8 +9,12 @@ test('root page（默认配置 tab）渲染页面标题、tab 导航与配置表
   await expect(page.getByText('Prometheus 数据源')).toBeVisible();
 });
 
-test('资产列表 tab 渲染工具栏', async ({ goto, page }) => {
+test('资产列表 tab 渲染工具栏与刷新按钮', async ({ goto, page }) => {
   await goto('/a/local-ecs-app?tab=assets');
 
   await expect(page.getByPlaceholder('搜索 ECS ID / 名称 / 规格 / 地域')).toBeVisible();
+  // 刷新按钮：点击沿原查询链路重跑（无数据源配置时落到错误提示，按钮本身常驻）
+  const refresh = page.getByRole('button', { name: '刷新资产列表' });
+  await expect(refresh).toBeVisible();
+  await expect(refresh).toBeEnabled({ timeout: 20_000 });
 });

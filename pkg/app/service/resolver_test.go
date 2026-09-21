@@ -56,14 +56,14 @@ func TestColdFetchBlocksThenFreshHits(t *testing.T) {
 	})
 	cfg := Config{AccessKeyID: "ak"}
 
-	got, err := r.instances(context.Background(), cfg)
+	got, err := r.instances(context.Background(), cfg, false)
 	if err != nil || len(got) != 1 || got[0].InstanceID != "i-new" {
 		t.Fatalf("冷启动应同步返回新值, got %v err=%v", got, err)
 	}
 	if atomic.LoadInt32(&calls) != 1 {
 		t.Fatalf("应恰好拉取 1 次, got %d", calls)
 	}
-	if _, err := r.instances(context.Background(), cfg); err != nil || atomic.LoadInt32(&calls) != 1 {
+	if _, err := r.instances(context.Background(), cfg, false); err != nil || atomic.LoadInt32(&calls) != 1 {
 		t.Errorf("新鲜期内应纯内存命中不重复拉取, calls=%d err=%v", calls, err)
 	}
 }
@@ -81,7 +81,7 @@ func TestStaleServesOldThenBackgroundReplaces(t *testing.T) {
 	r.store(cfg, []model.Instance{{InstanceID: "i-old"}})
 	r.cache.at = time.Now().Add(-2 * cacheTTL)
 
-	got, err := r.instances(context.Background(), cfg)
+	got, err := r.instances(context.Background(), cfg, false)
 	if err != nil || got[0].InstanceID != "i-old" {
 		t.Fatalf("过期后应立即返回旧值, got %v err=%v", got, err)
 	}
@@ -108,7 +108,7 @@ func TestStaleSingleFlight(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			got, err := r.instances(context.Background(), cfg)
+			got, err := r.instances(context.Background(), cfg, false)
 			if err != nil || got[0].InstanceID != "i-old" {
 				t.Errorf("并发过期请求应回旧值, got %v err=%v", got, err)
 			}
@@ -133,7 +133,7 @@ func TestHardStaleCapBlocks(t *testing.T) {
 	r.store(cfg, []model.Instance{{InstanceID: "i-old"}})
 	r.cache.at = time.Now().Add(-(hardStaleCap + time.Minute))
 
-	got, err := r.instances(context.Background(), cfg)
+	got, err := r.instances(context.Background(), cfg, false)
 	if err != nil || got[0].InstanceID != "i-new" {
 		t.Fatalf("超过硬上限应同步刷新返回新值, got %v err=%v", got, err)
 	}
@@ -155,7 +155,7 @@ func TestBackgroundFailureKeepsStaleAndRetries(t *testing.T) {
 	r.store(cfg, []model.Instance{{InstanceID: "i-old"}})
 	r.cache.at = time.Now().Add(-2 * cacheTTL)
 
-	got, err := r.instances(context.Background(), cfg)
+	got, err := r.instances(context.Background(), cfg, false)
 	if err != nil || got[0].InstanceID != "i-old" {
 		t.Fatalf("后台失败不应影响本次响应, got %v err=%v", got, err)
 	}
@@ -172,11 +172,43 @@ func TestBackgroundFailureKeepsStaleAndRetries(t *testing.T) {
 	}
 
 	// 再次请求：旧值照回，且会再次触发刷新（第二次成功）
-	if _, err := r.instances(context.Background(), cfg); err != nil {
+	if _, err := r.instances(context.Background(), cfg, false); err != nil {
 		t.Fatalf("重试请求不应报错: %v", err)
 	}
 	waitCache(t, r, "i-new")
 	if atomic.LoadInt32(&calls) != 2 {
 		t.Errorf("失败后应重试一次, calls=%d", calls)
+	}
+}
+
+// 手动刷新：新鲜期内 force 也必须真拉一次，且结果回写缓存供后续普通读命中。
+func TestForceRefreshBypassesFreshCache(t *testing.T) {
+	var calls int32
+	r := newTestResolver(func(_ context.Context, _ Config) ([]model.Instance, error) {
+		atomic.AddInt32(&calls, 1)
+		return []model.Instance{{InstanceID: "i-new"}}, nil
+	})
+	cfg := Config{AccessKeyID: "ak"}
+	r.store(cfg, []model.Instance{{InstanceID: "i-old"}}) // 此刻缓存新鲜
+
+	// 新鲜期普通读：纯内存命中
+	got, err := r.instances(context.Background(), cfg, false)
+	if err != nil || got[0].InstanceID != "i-old" || atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("新鲜期普通读应命中缓存, got %v calls=%d err=%v", got, calls, err)
+	}
+
+	// force：无视新鲜度，同步实拉并拿到新值
+	got, err = r.instances(context.Background(), cfg, true)
+	if err != nil || got[0].InstanceID != "i-new" {
+		t.Fatalf("force 应同步实时拉取, got %v err=%v", got, err)
+	}
+	if atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("force 应恰好实拉 1 次, got %d", calls)
+	}
+
+	// force 的结果已回写：后续普通读直接命中新值，不再拉
+	got, err = r.instances(context.Background(), cfg, false)
+	if err != nil || got[0].InstanceID != "i-new" || atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("force 后普通读应命中新缓存, got %v calls=%d err=%v", got, calls, err)
 	}
 }

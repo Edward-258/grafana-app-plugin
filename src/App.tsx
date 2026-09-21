@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { PluginPage, getBackendSrv } from '@grafana/runtime';
-import { Alert, FilterInput, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
+import { Alert, Button, FilterInput, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
 import ConfigPage from './ConfigPage';
 import { EcsAsset, EcsFields, fmtTime } from './EcsInfo';
@@ -31,11 +31,17 @@ export default function App({ query }: AppProps) {
   const [instances, setInstances] = useState<EcsAsset[]>([]);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<EcsAsset | null>(null);
+  // 手动刷新计数器：+1 让下面的 effect 重跑一次查询链路；forceRef 标记"本次
+  // 是否绕过缓存"——仅点击刷新键置位，消费即复位，进页面/切 tab 仍走缓存。
+  const [reloadSeq, setReloadSeq] = useState(0);
+  const forceRef = useRef(false);
 
   useEffect(() => {
     if (tab !== 'assets') {
       return;
     }
+    const force = forceRef.current;
+    forceRef.current = false;
     setLoading(true);
     setError(null);
     (async () => {
@@ -51,6 +57,7 @@ export default function App({ query }: AppProps) {
         }
         const res = await getBackendSrv().post<ListResponse>(`/api/plugins/${pluginJson.id}/resources/ecs/enrich`, {
           identities,
+          refresh: force,
         });
         setInstances(res.instances || []);
       } catch (e) {
@@ -59,7 +66,7 @@ export default function App({ query }: AppProps) {
         setLoading(false);
       }
     })();
-  }, [tab]);
+  }, [tab, reloadSeq]);
 
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -100,6 +107,18 @@ export default function App({ query }: AppProps) {
         <>
           <div className={styles.toolbar}>
             <FilterInput placeholder="搜索 ECS ID / 名称 / 规格 / 地域" value={filter} onChange={setFilter} />
+            <Button
+              variant="secondary"
+              icon="sync"
+              aria-label="刷新资产列表"
+              tooltip="强制实时查询：绕过缓存直接请求阿里云全地域"
+              disabled={loading}
+              className={loading ? styles.spin : undefined}
+              onClick={() => {
+                forceRef.current = true;
+                setReloadSeq((s) => s + 1);
+              }}
+            />
           </div>
 
           {loading && <LoadingPlaceholder text="正在从 Prometheus 对齐 ECS..." />}
@@ -170,6 +189,14 @@ const getStyles = (theme: GrafanaTheme2) => ({
     gap: theme.spacing(2),
     marginBottom: theme.spacing(2),
     maxWidth: 720,
+  }),
+  // 加载中让刷新按钮的图标转起来（disabled 只是变灰，状态不够显性）
+  spin: css({
+    svg: { animation: 'ecs-refresh-spin 1s linear infinite' },
+    '@keyframes ecs-refresh-spin': {
+      from: { transform: 'rotate(0deg)' },
+      to: { transform: 'rotate(360deg)' },
+    },
   }),
   linkish: css({
     border: 'none',
