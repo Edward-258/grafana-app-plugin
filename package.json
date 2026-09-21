@@ -41,7 +41,7 @@
     "swc-loader": "^0.2.6",
     "typescript": "^5.7.0",
     "webpack": "^5.97.0",
-    "webpack-cli": "^5.1.4"
+    "webpack-cli": "^7.2.3"
   },
   "engines": {
     "node": ">=20"
