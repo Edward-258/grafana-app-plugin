@@ -83,6 +83,7 @@ export default function App({ query }: AppProps) {
         i.monitorName,
         i.creationTime,
         i.expiredTime,
+        i.leaseStart,
       ]
         .join(' ')
         .toLowerCase()
@@ -146,6 +147,7 @@ export default function App({ query }: AppProps) {
                   <th>规格</th>
                   <th>地域</th>
                   <th>创建时间</th>
+                  <th>租赁开始</th>
                   <th>到期时间</th>
                   <th>vCPU</th>
                   <th>内存</th>
@@ -163,6 +165,7 @@ export default function App({ query }: AppProps) {
                     <td>{row.instanceType || '—'}</td>
                     <td>{row.regionId || '—'}</td>
                     <td>{fmtTime(row.creationTime)}</td>
+                    <td>{row.leaseStart ? fmtTime(row.leaseStart) : <span className={styles.note}>—</span>}</td>
                     <td>{row.chargeType === 'PostPaid' ? '按量付费' : fmtTime(row.expiredTime)}</td>
                     <td>{row.cpu || '—'}</td>
                     <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>

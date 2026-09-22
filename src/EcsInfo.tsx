@@ -18,6 +18,7 @@ export type EcsAsset = {
   creationTime?: string;
   expiredTime?: string;
   chargeType?: string;
+  leaseStart?: string;
   monitorName?: string;
   matched?: boolean;
   note?: string;
@@ -107,6 +108,14 @@ export function EcsFields({ instance }: { instance: EcsAsset }) {
       <dd>{chargeLabel(instance.chargeType)}</dd>
       <dt>创建时间</dt>
       <dd>{fmtTime(instance.creationTime)}</dd>
+      <dt>租赁开始</dt>
+      <dd>
+        {instance.leaseStart ? (
+          fmtTime(instance.leaseStart)
+        ) : (
+          <span className={styles.muted}>BSS 未返回（软降级）</span>
+        )}
+      </dd>
       <dt>到期时间</dt>
       <dd>
         {instance.chargeType === 'PostPaid' ? (
