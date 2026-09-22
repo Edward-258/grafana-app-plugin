@@ -155,18 +155,18 @@ func (r *Resolver) refresh(ctx context.Context, cfg Config) ([]model.Instance, e
 	return list, nil
 }
 
-// applyBss 把 BSS 精确创建时间合入快照（就地改写 list），随 SWR 缓存、
-// 单飞与强制刷新自然复用——三条刷新路径（同步/后台/force）都经过这里。
-// 软失败：BSS 不可用时保留 ECS CreationTime，主链路照常工作。
+// applyBss 把 BSS 订单口径的开通时间写入快照的 LeaseStartTime（独立字段，
+// 不动 ECS CreationTime），随 SWR 缓存、单飞与强制刷新自然复用——三条刷新
+// 路径（同步/后台/force）都经过这里。软失败：BSS 不可用时字段留空，主链路照常。
 func (r *Resolver) applyBss(ctx context.Context, cfg Config, list []model.Instance) {
 	bss, err := r.fetchBss(ctx, cfg)
 	if err != nil {
-		log.DefaultLogger.Error("BSS 创建时间补充失败，沿用 ECS CreationTime", "error", err)
+		log.DefaultLogger.Error("BSS 租赁开始时间补充失败，LeaseStart 置空", "error", err)
 		return
 	}
 	for i := range list {
 		if t := bss[list[i].InstanceID]; t != "" {
-			list[i].CreationTime = t
+			list[i].LeaseStartTime = t
 		}
 	}
 }

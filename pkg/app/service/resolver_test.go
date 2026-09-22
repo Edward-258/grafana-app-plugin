@@ -215,8 +215,9 @@ func TestForceRefreshBypassesFreshCache(t *testing.T) {
 	}
 }
 
-// BSS 补充链路：刷新时把精确创建时间合入快照，命中缓存与强制刷新都吃到同一路数据。
-func TestBssOverridesCreationTime(t *testing.T) {
+// BSS 补充链路：刷新时把订单口径开通时间写入 LeaseStartTime（独立字段），
+// ECS CreationTime 保持原值；命中缓存与强制刷新都吃到同一路数据。
+func TestBssSuppliesLeaseStart(t *testing.T) {
 	r := newTestResolver(func(_ context.Context, _ Config) ([]model.Instance, error) {
 		return []model.Instance{{InstanceID: "i-x", CreationTime: "2026-01-01T00:00Z"}}, nil
 	})
@@ -228,8 +229,11 @@ func TestBssOverridesCreationTime(t *testing.T) {
 	cfg := Config{AccessKeyID: "ak"}
 
 	got, err := r.instances(context.Background(), cfg, false)
-	if err != nil || got[0].CreationTime != "2026-06-23T06:09:41Z" {
-		t.Fatalf("BSS 时间应合入快照, got %v err=%v", got, err)
+	if err != nil || got[0].LeaseStartTime != "2026-06-23T06:09:41Z" {
+		t.Fatalf("BSS 时间应写入 LeaseStartTime, got %v err=%v", got, err)
+	}
+	if got[0].CreationTime != "2026-01-01T00:00Z" {
+		t.Fatalf("ECS CreationTime 不应被 BSS 覆盖, got %q", got[0].CreationTime)
 	}
 
 	// 新鲜期普通读：纯内存命中，BSS 不再被调
@@ -249,7 +253,7 @@ func TestBssOverridesCreationTime(t *testing.T) {
 	}
 }
 
-// BSS 软降级：补充链路失败不影响主链路，保留 ECS CreationTime。
+// BSS 软降级：补充链路失败不影响主链路，LeaseStartTime 留空、CreationTime 保留 ECS 值。
 func TestBssFailureKeepsEcsTime(t *testing.T) {
 	r := newTestResolver(func(_ context.Context, _ Config) ([]model.Instance, error) {
 		return []model.Instance{{InstanceID: "i-x", CreationTime: "2026-01-01T00:00Z"}}, nil
@@ -259,7 +263,7 @@ func TestBssFailureKeepsEcsTime(t *testing.T) {
 	}
 
 	got, err := r.instances(context.Background(), Config{AccessKeyID: "ak"}, false)
-	if err != nil || got[0].CreationTime != "2026-01-01T00:00Z" {
-		t.Fatalf("BSS 失败应保留 ECS 时间且不报错, got %v err=%v", got, err)
+	if err != nil || got[0].CreationTime != "2026-01-01T00:00Z" || got[0].LeaseStartTime != "" {
+		t.Fatalf("BSS 失败应留空 leaseStart 且保留 ECS 时间, got %v err=%v", got, err)
 	}
 }

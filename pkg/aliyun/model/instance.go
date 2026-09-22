@@ -21,11 +21,15 @@ type Instance struct {
 	PublicIPs    []string
 	ZoneID       string
 	RegionID     string
-	// 租期信息：CreationTime 兼作租赁起点（近似口径，续费不更新）；
+	// 租期信息：CreationTime 是实例创建时刻（ECS 口径，续费不更新）；
 	// ExpiredTime 仅 PrePaid 有值；原始 UTC ISO 字符串原样透传。
 	CreationTime string
 	ExpiredTime  string
 	ChargeType   string
+	// LeaseStartTime 是 BSS 订单口径的资源开通时间（租赁开始）；与
+	// CreationTime 多数情况相同或差秒级，语义不同故分列展示。
+	// BSS 补充链路失败时为空，前端显示占位。
+	LeaseStartTime string
 }
 
 // PublicAsset is the payload returned to the plugin UI. No addresses.
@@ -41,6 +45,7 @@ type PublicAsset struct {
 	CreationTime string `json:"creationTime,omitempty"`
 	ExpiredTime  string `json:"expiredTime,omitempty"`
 	ChargeType   string `json:"chargeType,omitempty"`
+	LeaseStart   string `json:"leaseStart,omitempty"`
 }
 
 func (i Instance) Public() PublicAsset {
@@ -53,9 +58,10 @@ func (i Instance) Public() PublicAsset {
 		MemoryGiB:    i.MemoryGiB,
 		ZoneID:       i.ZoneID,
 		RegionID:     i.RegionID,
-		CreationTime: i.CreationTime,
-		ExpiredTime:  i.ExpiredTime,
-		ChargeType:   i.ChargeType,
+		CreationTime:   i.CreationTime,
+		ExpiredTime:    i.ExpiredTime,
+		ChargeType:     i.ChargeType,
+		LeaseStart:     i.LeaseStartTime,
 	}
 }
 
