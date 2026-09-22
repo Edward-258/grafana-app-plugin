@@ -48,3 +48,34 @@ func TestRawInstanceParsesLeaseFields(t *testing.T) {
 		}
 	}
 }
+
+// BSS QueryAvailableInstances：字段解析 + ProductCode 客户端二次过滤（服务端筛 ecs 仍混入 sas）。
+func TestParseAvailableInstancesFiltersNonEcs(t *testing.T) {
+	body := []byte(`{
+		"Success": true,
+		"Data": {
+			"TotalCount": 3,
+			"InstanceList": [
+				{"ProductCode": "ecs", "InstanceID": "i-1", "CreateTime": "2026-08-14T08:51:03Z"},
+				{"ProductCode": "sas", "InstanceID": "sas_x", "CreateTime": "2026-06-23T08:00:00Z"},
+				{"ProductCode": "ecs", "InstanceID": "i-2", "CreateTime": "2026-09-14T06:49:48Z"}
+			]
+		}
+	}`)
+	var parsed availableInstancesResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, it := range parsed.Data.InstanceList {
+		if it.ProductCode == "ecs" && it.InstanceID != "" {
+			got[it.InstanceID] = it.CreateTime
+		}
+	}
+	if len(got) != 2 || got["i-1"] != "2026-08-14T08:51:03Z" || got["i-2"] != "2026-09-14T06:49:48Z" {
+		t.Fatalf("应只保留 ecs 产品: %v", got)
+	}
+	if _, ok := got["sas_x"]; ok {
+		t.Fatalf("非 ecs 产品不应混入: %v", got)
+	}
+}

@@ -52,6 +52,6 @@ docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允
 ## 架构分层
 
 - `src/` 前端（module.tsx 注册 root page / config page / 面板菜单扩展；import 分层有约定，勿破坏）
-- `pkg/aliyun/` 阿里云 OpenAPI（RPC 签名、全地域枚举、唯一命中匹配）
+- `pkg/aliyun/` 阿里云 OpenAPI（RPC 签名、全地域枚举、唯一命中匹配；BSS 补充链路 `CreationTimes()`——`business.aliyuncs.com` 的 QueryAvailableInstances 取精确创建时间，软失败保留 ECS 值）
 - `pkg/app/` 插件后端（ServeMux + httpadapter；资源端点 `/ecs/enrich|resolve|test|ak`；探活走 SDK 的 CheckHealth 通道；`auth.go` RBAC 中间件；`guardrails.go` 请求守卫——body 1MB/413、identities 2000 条/400、阿里云响应 4MB 拒读，调整限额只动这一个文件）
 - `provisioning/` Grafana 部署配置

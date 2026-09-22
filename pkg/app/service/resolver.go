@@ -40,6 +40,9 @@ type Resolver struct {
 	cache *ecsCache
 	// fetch 抽象"全量拉取"动作以便测试注入；生产实现是阿里云全地域扫描。
 	fetch func(ctx context.Context, cfg Config) ([]model.Instance, error)
+	// fetchBss 是 BSS「已购资源」补充链路（精确创建时间，订单口径）。
+	// 失败软降级：日志告警后保留 ECS CreationTime，不打断资产主链路。
+	fetchBss func(ctx context.Context, cfg Config) (map[string]string, error)
 }
 
 type ecsCache struct {
@@ -50,9 +53,14 @@ type ecsCache struct {
 }
 
 func NewResolver() *Resolver {
-	return &Resolver{fetch: func(ctx context.Context, cfg Config) ([]model.Instance, error) {
-		return client.New(cfg).ListAll(ctx)
-	}}
+	return &Resolver{
+		fetch: func(ctx context.Context, cfg Config) ([]model.Instance, error) {
+			return client.New(cfg).ListAll(ctx)
+		},
+		fetchBss: func(ctx context.Context, cfg Config) (map[string]string, error) {
+			return client.New(cfg).CreationTimes(ctx)
+		},
+	}
 }
 
 // Resolve maps one Prometheus identity to the ECS the AK can see——Enrich 的
@@ -93,6 +101,7 @@ func (r *Resolver) Test(ctx context.Context, cfg Config) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	r.applyBss(ctx, cfg, list) // 与正常快照同一合入规则，保证缓存语义一致
 	r.store(cfg, list)
 	return len(list), len(model.RegionSet(list)), nil
 }
@@ -141,14 +150,34 @@ func (r *Resolver) refresh(ctx context.Context, cfg Config) ([]model.Instance, e
 	if err != nil {
 		return nil, err
 	}
+	r.applyBss(ctx, cfg, list)
 	r.store(cfg, list)
 	return list, nil
+}
+
+// applyBss 把 BSS 精确创建时间合入快照（就地改写 list），随 SWR 缓存、
+// 单飞与强制刷新自然复用——三条刷新路径（同步/后台/force）都经过这里。
+// 软失败：BSS 不可用时保留 ECS CreationTime，主链路照常工作。
+func (r *Resolver) applyBss(ctx context.Context, cfg Config, list []model.Instance) {
+	bss, err := r.fetchBss(ctx, cfg)
+	if err != nil {
+		log.DefaultLogger.Error("BSS 创建时间补充失败，沿用 ECS CreationTime", "error", err)
+		return
+	}
+	for i := range list {
+		if t := bss[list[i].InstanceID]; t != "" {
+			list[i].CreationTime = t
+		}
+	}
 }
 
 // backgroundRefresh 必须用 context.Background：触发它的请求一旦返回，
 // 其 ctx 即被取消——用请求 ctx 做后台刷新会被半路掐死（SWR 经典坑）。
 func (r *Resolver) backgroundRefresh(cfg Config) {
 	list, err := r.fetch(context.Background(), cfg)
+	if err == nil {
+		r.applyBss(context.Background(), cfg, list)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c := r.cache

@@ -68,8 +68,27 @@ func (r rawInstance) toInstance() model.Instance {
 }
 
 type apiEnvelope struct {
-	Code    string `json:"Code"`
+	Code string `json:"Code"`
 	Message string `json:"Message"`
+	// BSS 系（如 QueryAvailableInstances）的成功响应同样携带 Code/Message
+	//（"Success"/"Successful!"），必须以显式 Success 标志区分成败；
+	// ECS 系响应不带该字段（nil），维持原"Code+Message 即错误"的判断。
+	Success *bool `json:"Success"`
+}
+
+// availableInstancesResponse 是 BSS QueryAvailableInstances（已购资源）的响应。
+// 只解析本链路关心的字段；ProductCode 需客户端二次过滤（服务端按 ecs 筛
+// 仍会混入 sas 等产品，2026-09-23 实测）。
+type availableInstancesResponse struct {
+	Success bool `json:"Success"`
+	Data    struct {
+		TotalCount   int `json:"TotalCount"`
+		InstanceList []struct {
+			ProductCode string `json:"ProductCode"`
+			InstanceID  string `json:"InstanceID"`
+			CreateTime  string `json:"CreateTime"`
+		} `json:"InstanceList"`
+	} `json:"Data"`
 }
 
 func truncate(s string, n int) string {
