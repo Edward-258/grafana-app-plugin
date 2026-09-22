@@ -11,4 +11,5 @@ Initial release.
 - 资产列表刷新按钮：一键强制实时查询（`refresh:true` 绕过 SWR 缓存直达阿里云全地域枚举，结果回写缓存），进页面/切 tab 仍走缓存。
 - RBAC：`ecs:read` / `ecs:reveal` / `ecs:write` 三级 action，plugin.json 单源生成前后端常量；凭证仅存 `secureJsonData`。
 - 稳定性：请求守卫三道闸（body 1MB、identities 2000 条、阿里云响应 4MB）、资产缓存 stale-while-revalidate（30 分钟硬上限）。
+- 安全加固：`GF_SECURITY_SECRET_KEY` 经 `.env` 注入（不入库），grafana.db 中 AK/SK 不再依赖公开默认密钥加密。
 - 工程化：ESLint + Prettier（`@grafana/eslint-config`）、Playwright e2e（面板菜单扩展红线回归 + RBAC 拦截回归）、GitHub Actions CI（build 双关卡 + e2e 双实例）、is-compatible 前端 API 兼容检查、dependabot、golangci-lint。

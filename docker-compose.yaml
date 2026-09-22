@@ -11,6 +11,9 @@ services:
       GF_FEATURE_TOGGLES_ENABLE: externalServiceAccounts
       GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
       GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: local-ecs-app
+      # 加密 grafana.db 里 secure_json_data（AK/SK）的密钥，取自同目录 .env（不入库）；
+      # 留空时 Grafana 用公开默认密钥（CI 即此情形：临时容器、无真实 AK，无风险）
+      GF_SECURITY_SECRET_KEY: ${GF_SECURITY_SECRET_KEY:-}
       GF_LOG_LEVEL: info
       GF_LOG_FILTERS: plugin.local-ecs-app:debug
     volumes:

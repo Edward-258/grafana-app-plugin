@@ -58,6 +58,7 @@
 ## 4. Secrets 与安全红线
 
 - **`jsonData` 禁存敏感信息**（官方警告原话）。secret 必须 `secureJsonData`（落库加密）。
+- **secureJsonData 的加密强度取决于 `GF_SECURITY_SECRET_KEY`**：不设置时 Grafana 用公开的内置默认密钥，拿到 grafana.db 即可解出 AK/SK（2026-09-23 已实证走通完整信封解密链：外层 `#dataKeyId#` → `data_keys` 表 → 默认密钥解 data key → 内层 pbkdf2 AES）。本项目对策：密钥放 `.env`（gitignore，模板 `.env.example`），compose 两侧注入；CI 走空值回落默认（临时容器无真实 AK）。换密钥后旧密文作废需重录 AK。
 - 前端判断 secret 是否已配置：只看 `secureJsonFields.<key> === true`，永远拿不到值。
 - 保存时只发送**被用户修改的** secret 键；发空字符串也会覆盖旧值（本项目 ConfigPage 的 `secureJsonData: secret ? {...} : undefined` 模式正确）。
 - **本项目自有红线（比官方更严）：任何 ECS IP（内网/公网）不得到达浏览器**。后端 `Public()` 裁剪 + `TestPublicAssetOmitsIPs` 守护，改动 model 时不可绕过。
