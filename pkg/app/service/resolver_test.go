@@ -14,6 +14,8 @@ import (
 func newTestResolver(fetch func(ctx context.Context, cfg Config) ([]model.Instance, error)) *Resolver {
 	r := NewResolver()
 	r.fetch = fetch
+	// 默认屏蔽 BSS 真实网络调用；需要 BSS 语义的用例自行覆写
+	r.fetchBss = func(context.Context, Config) (map[string]string, error) { return nil, nil }
 	return r
 }
 
@@ -210,5 +212,54 @@ func TestForceRefreshBypassesFreshCache(t *testing.T) {
 	got, err = r.instances(context.Background(), cfg, false)
 	if err != nil || got[0].InstanceID != "i-new" || atomic.LoadInt32(&calls) != 1 {
 		t.Fatalf("force 后普通读应命中新缓存, got %v calls=%d err=%v", got, calls, err)
+	}
+}
+
+// BSS 补充链路：刷新时把精确创建时间合入快照，命中缓存与强制刷新都吃到同一路数据。
+func TestBssOverridesCreationTime(t *testing.T) {
+	r := newTestResolver(func(_ context.Context, _ Config) ([]model.Instance, error) {
+		return []model.Instance{{InstanceID: "i-x", CreationTime: "2026-01-01T00:00Z"}}, nil
+	})
+	var bssCalls int32
+	r.fetchBss = func(_ context.Context, _ Config) (map[string]string, error) {
+		atomic.AddInt32(&bssCalls, 1)
+		return map[string]string{"i-x": "2026-06-23T06:09:41Z"}, nil
+	}
+	cfg := Config{AccessKeyID: "ak"}
+
+	got, err := r.instances(context.Background(), cfg, false)
+	if err != nil || got[0].CreationTime != "2026-06-23T06:09:41Z" {
+		t.Fatalf("BSS 时间应合入快照, got %v err=%v", got, err)
+	}
+
+	// 新鲜期普通读：纯内存命中，BSS 不再被调
+	if _, err := r.instances(context.Background(), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&bssCalls) != 1 {
+		t.Fatalf("新鲜期不应重复调 BSS, calls=%d", bssCalls)
+	}
+
+	// 强制刷新：BSS 与 ECS 同批重拉
+	if _, err := r.instances(context.Background(), cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&bssCalls) != 2 {
+		t.Fatalf("force 应连带 BSS 重拉, calls=%d", bssCalls)
+	}
+}
+
+// BSS 软降级：补充链路失败不影响主链路，保留 ECS CreationTime。
+func TestBssFailureKeepsEcsTime(t *testing.T) {
+	r := newTestResolver(func(_ context.Context, _ Config) ([]model.Instance, error) {
+		return []model.Instance{{InstanceID: "i-x", CreationTime: "2026-01-01T00:00Z"}}, nil
+	})
+	r.fetchBss = func(context.Context, Config) (map[string]string, error) {
+		return nil, errors.New("bss 无权限")
+	}
+
+	got, err := r.instances(context.Background(), Config{AccessKeyID: "ak"}, false)
+	if err != nil || got[0].CreationTime != "2026-01-01T00:00Z" {
+		t.Fatalf("BSS 失败应保留 ECS 时间且不报错, got %v err=%v", got, err)
 	}
 }
