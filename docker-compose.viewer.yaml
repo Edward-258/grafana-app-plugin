@@ -12,6 +12,7 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: 'false'
       GF_DEFAULT_APP_MODE: development
       GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: local-ecs-app
+      GF_SECURITY_SECRET_KEY: ${GF_SECURITY_SECRET_KEY:-}
       GF_LOG_LEVEL: info
       GF_FEATURE_TOGGLES_ENABLE: externalServiceAccounts
       GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
