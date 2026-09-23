@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "datasource",
+  "name": "ECS 资产（告警）",
+  "id": "%PLUGIN_ID_DS%",
+  "backend": true,
+  "alerting": true,
+  "executable": "gpx_ecs_ds",
+  "info": {
+    "keywords": ["alerting", "ecs", "aliyun"],
+    "description": "把 ECS 资产与账户概览快照暴露为告警规则可查询的数据帧，随 local-ecs-app 捆绑分发",
+    "author": { "name": "local" },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=11.6.0",
+    "plugins": []
+  }
+}

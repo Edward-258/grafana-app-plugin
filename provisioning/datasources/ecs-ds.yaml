@@ -1,0 +1,12 @@
+# 预置捆绑数据源实例（uid 固定，告警引导卡文案引用它）。
+# 凭证不在此声明（红线：凭证只进 secureJsonData、由 app 配置页保存时同步），
+# 未同步前 CheckHealth 为 Unknown 属预期。
+apiVersion: 1
+
+datasources:
+  - name: ECS 资产（告警）
+    uid: ecs-ds
+    type: local-ecs-app-ds
+    access: proxy
+    isDefault: false
+    editable: true

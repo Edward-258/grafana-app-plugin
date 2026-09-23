@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 (Unreleased)
+
+### Features
+
+- Grafana 告警集成：捆绑后端数据源 `local-ecs-app-ds`（app+datasource 组合，`includes` 登记 + provisioning 预置 uid `ecs-ds`），把资产/账单快照暴露为告警规则可查询的数据帧。`assets` 帧为宽序列（time + 每实例一个带标签的 `daysToExpire`，标签 instanceId/name/type/region/chargeType 随告警实例带出）；`account` 帧单行（availableAmount/couponAmount/billTotal）。**规则在 Grafana Alerting UI 由用户自建**（资产页引导卡 + `/alerting/list` 深链），已实证全链路：实建 `daysToExpire < 1000` 规则 → 告警引擎无用户上下文取数评估 → 到期实例 Alerting、长期实例 Normal。
+- 告警数据源凭证自动同步：app 后端启动（含配置保存触发的实例重建）时以 service account（plugin.json `iam` 新增 Grafana 核心 action `datasources:read/write`，`users.permissions:read` 先例）把配置页 AK 经数据源 API 写入 ds 的 `secureJsonData`——Secret 只能写不能读，前端无法搬运已存密文；幂等标记是 AK ID 的 sha256 前缀（存 ds `jsonData`，承诺值不泄漏本体），换 AK 自动重同步。
+- 告警数据源权限分档与插件 UI 一致：`assets` 帧 `ecs:read`（Viewer 可读）、`account` 帧 `ecs:reveal`（Editor/Admin，与 `attachBilling` 同档），先鉴权后读设置（不向未授权调用者泄漏凭证配置状态）；评估态（无用户上下文）放行供告警引擎取数。注意：告警实例的触发值对能看告警的人天然可见（财务数字进告警即具广播属性）。
+
 ## 1.0.0 (Unreleased)
 
 Initial release.

@@ -21,6 +21,11 @@
   },
   "includes": [
     {
+      "type": "datasource",
+      "name": "ECS 资产（告警）",
+      "path": "datasource/plugin.json"
+    },
+    {
       "type": "page",
       "name": "ECS 资产",
       "path": "/a/%PLUGIN_ID%",
@@ -65,7 +70,11 @@
     }
   ],
   "iam": {
-    "permissions": [{ "action": "users.permissions:read", "scope": "users:*" }]
+    "permissions": [
+      { "action": "users.permissions:read", "scope": "users:*" },
+      { "action": "datasources:read", "scope": "datasources:*" },
+      { "action": "datasources:write", "scope": "datasources:*" }
+    ]
   },
   "extensions": {
     "addedLinks": [

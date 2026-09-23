@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
-import { PluginPage, getBackendSrv } from '@grafana/runtime';
+import { PluginPage, getBackendSrv, locationService } from '@grafana/runtime';
 import { Alert, Button, FilterInput, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
 import ConfigPage from './ConfigPage';
@@ -110,6 +110,25 @@ export default function App({ query }: AppProps) {
 
       {tab === 'assets' && (
         <>
+          <Alert title="接入 Grafana 告警" severity="info">
+            在 Alerting 里用数据源「ECS 资产（告警）」创建规则即可对资产/账单设阈值，例如{' '}
+            <code>daysToExpire &lt; 7</code>（到期提醒）
+            {billing && (
+              <>
+                、<code>availableAmount &lt; 100</code>（余额不足）
+              </>
+            )}
+            ；快照缓存 5 分钟，评估间隔建议 ≥ 5m。
+            <Button
+              size="sm"
+              variant="secondary"
+              icon="bell"
+              className={styles.alertBtn}
+              onClick={() => locationService.push('/alerting/list')}
+            >
+              创建告警规则
+            </Button>
+          </Alert>
           {billing && (
             <div className={styles.overview}>
               <span>
@@ -261,6 +280,9 @@ const getStyles = (theme: GrafanaTheme2) => ({
     color: theme.colors.text.link,
     cursor: 'pointer',
     padding: 0,
+  }),
+  alertBtn: css({
+    marginLeft: theme.spacing(2),
   }),
   table: css({
     width: '100%',
