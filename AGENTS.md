@@ -7,17 +7,20 @@ Grafana App 插件 `local-ecs-app`：阿里云 ECS 资产（ID/规格/地域）�
 ## 红线（违反即事故）
 
 1. **UI 扩展双登记**：代码 `addLink()` 注册的扩展必须同时在 `src/plugin.json` 的 `extensions.addedLinks[]` 声明，缺一会静默消失（无 server 日志，只有浏览器 console 报错）。改动 plugin.json 或扩展注册后必须浏览器验证菜单仍存在。
-2. **ECS IP 永不进浏览器**：后端 `Public()` 裁剪 + `TestPublicAssetOmitsIPs` 守护，任何 model/接口改动不得让 IP 到达前端。
+2. **ECS IP 永不进浏览器**：后端 `Public()` 裁剪 + `TestPublicAssetOmitsIPs` 守护，任何 model/接口改动不得让 IP 到达前端。**告警数据源的帧是同一浏览器面**：`pkg/ds/server/frames.go` 字段白名单 + `TestFramesOmitIPs` 守护，新字段必须走白名单评审。
 3. **AK 严格对应**：资产只能来自该 AK 的全地域枚举且唯一命中；任一地域查询失败则整体失败，禁止部分结果。
-4. **凭证只进 `secureJsonData`**：AK ID 与 Secret 都属加密存储（`jsonData` 禁存敏感值）；保存时只发被修改的键（空字符串也会覆盖旧值）。Viewer 只能见脱敏 AK ID（前3+后3），完整值仅 `ecs:reveal` 持有者可得（`/ecs/ak` 端点按角色下发）。
+4. **凭证只进 `secureJsonData`**：AK ID 与 Secret 都属加密存储（`jsonData` 禁存敏感值；ds 的幂等标记只允许存 AK ID 的 sha256 前缀，那是承诺值不是敏感值）；保存时只发被修改的键（空字符串也会覆盖旧值）。Viewer 只能见脱敏 AK ID（前3+后3），完整值仅 `ecs:reveal` 持有者可得（`/ecs/ak` 端点按角色下发）。**告警数据源的凭证由 app 后端启动时自动同步**（`sync.go`，SA 走数据源 API），不要在前端搬运 Secret——本进程外的已存密文前端读不到。
+5. **财务数据两道门**：UI 响应 `attachBilling()`（ecs:reveal）之外，告警数据源 `account` 帧同样仅 Editor/Admin（`authorize`），且 QueryData **先鉴权后读设置**。已知取舍（文档已明示）：告警实例的触发值对能看告警的人天然可见，财务数字进告警即广播。
 
 ## RBAC 权限矩阵（plugin.json roles[] + 后端 requireAction）
 
-| action                     | grants              | 能做什么                                                        |
-| -------------------------- | ------------------- | --------------------------------------------------------------- |
-| `local-ecs-app.ecs:read`   | Viewer/Editor/Admin | 资产对齐端点（enrich/resolve）、脱敏 AK                         |
-| `local-ecs-app.ecs:reveal` | Editor/Admin        | 完整 AK（小眼睛）、连通测试、**账户概览（余额/代金券/月账单）** |
-| `local-ecs-app.ecs:write`  | 仅 Admin            | 改写 AK ID/Secret、配置页保存                                   |
+| action                     | grants              | 能做什么                                                                                 |
+| -------------------------- | ------------------- | ---------------------------------------------------------------------------------------- |
+| `local-ecs-app.ecs:read`   | Viewer/Editor/Admin | 资产对齐端点（enrich/resolve）、脱敏 AK、告警数据源 `assets` 帧                          |
+| `local-ecs-app.ecs:reveal` | Editor/Admin        | 完整 AK（小眼睛）、连通测试、**账户概览（余额/代金券/月账单）**、告警数据源 `account` 帧 |
+| `local-ecs-app.ecs:write`  | 仅 Admin            | 改写 AK ID/Secret、配置页保存                                                            |
+
+**告警数据源的角色门禁走同一套 roleActions 回退映射**（`pkg/ds/server` 的 `authorize` 复用 `handler.RoleHas`；QueryData 走 gRPC 无 id token，与匿名降级同语义）。评估态（PluginContext.User=nil，即告警引擎）放行取数。
 
 **常量单源生成（SSOT）**：`src/plugin.json` 是唯一源头，`npm run build` 前置运行 `scripts/gen-permissions.js` 生成 `pkg/app/handler/zz_generated.go`（PluginID、三个 action 常量、roleActions 回退映射）和 `src/permissions.gen.ts`。**任何地方不得手写权限字符串**；新增 action 必须先在生成器 `SEMANTIC` 和守护测试 `zz_generated_test.go` 同时登记（故意制造摩擦）。改 plugin.json 后忘重新生成会被 `go test` 抓住（守护测试独立重推导比对 + 硬编码语义锚点）。插件 ID 的源头是 `package.json` 的 `name`（webpack 与生成器同源；Go 侧引用 `handler.PluginID`）。
 
@@ -33,13 +36,13 @@ Grafana App 插件 `local-ecs-app`：阿里云 ECS 资产（ID/规格/地域）�
 ## 构建与验证
 
 ```bash
-npm run build                          # 生成 RBAC 常量 + 前端(webpack) + 后端(gox linux/amd64 → dist/gpx_ecs_linux_amd64)
+npm run build                          # 生成 RBAC 常量 + 前端(webpack 双配置：app + 捆绑 ds) + 后端双二进制（dist/gpx_ecs_linux_amd64 + dist/datasource/gpx_ecs_ds_linux_amd64）
 npm run lint                           # ESLint（@grafana/eslint-config）+ Prettier；lint:fix 自动修（scripts/、webpack.config.js 不参与）
 golangci-lint run ./...                # 后端 lint（v2.13.2，配置 .golangci.yml；旧版二进制无法分析 go 1.26）
-go vet ./... && go test ./...          # 后端（含 zz_generated 守护测试）
-npx tsc --noEmit                       # 前端类型（含 tests/）
-npm run e2e                            # Playwright e2e（tests/）：面板菜单扩展红线 + RBAC 拦截 + 页面导航
-docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允许未签名）
+go vet ./... && go test ./...          # 后端（含 zz_generated 守护测试 + pkg/ds 帧门禁/IP 守护测试）
+npx tsc --noEmit                       # 前端类型（含 tests/ 与 src/datasource/）
+npm run e2e                            # Playwright e2e（tests/，12 用例）：面板菜单扩展红线 + RBAC 拦截 + 页面导航 + 告警数据源
+docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允许未签名 local-ecs-app 与 local-ecs-app-ds）
 ```
 
 - **CI（GitHub Actions，推到 origin 后自动跑）**：`.github/workflows/ci.yml` 双 job——build（prettier/eslint/tsc/golangci/go test/build）与 e2e（起主实例 + viewer 对照实例，浏览器本地启动跑全套 Playwright）；`is-compatible.yml` 用官方 levitate 查前端 API 弃用（PR 时跑）；`dependabot.yml` 周更依赖（gomod 只放行 plugin-sdk）。本地 e2e 是「CDP 容器浏览器 + 172.17.0.1」拓扑、CI 是「本地浏览器 + localhost」拓扑，靠 `PW_CDP_ENDPOINT`/`GRAFANA_*_URL` 环境变量切换（见 tests/fixtures.ts 头注），代码零改动。
@@ -51,7 +54,8 @@ docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允
 
 ## 架构分层
 
-- `src/` 前端（module.tsx 注册 root page / config page / 面板菜单扩展；import 分层有约定，勿破坏）
+- `src/` 前端（module.tsx 注册 root page / config page / 面板菜单扩展；`src/datasource/` 是捆绑告警数据源的前端，独立 webpack 配置产出 `dist/datasource/`；import 分层有约定，勿破坏）
 - `pkg/aliyun/` 阿里云 OpenAPI（RPC 签名、全地域枚举、唯一命中匹配；BSS 补充链路 `CreationTimes()`——`business.aliyuncs.com` 的 QueryAvailableInstances 取订单口径租赁开始时间 `leaseStart`（独立字段，ECS creationTime 不动），软失败置空）
-- `pkg/app/` 插件后端（ServeMux + httpadapter；资源端点 `/ecs/enrich|resolve|test|ak`；探活走 SDK 的 CheckHealth 通道；`auth.go` RBAC 中间件；`guardrails.go` 请求守卫——body 1MB/413、identities 2000 条/400、阿里云响应 4MB 拒读，调整限额只动这一个文件）
-- `provisioning/` Grafana 部署配置
+- `pkg/app/` 插件后端（ServeMux + httpadapter；资源端点 `/ecs/enrich|resolve|test|ak`；探活走 SDK 的 CheckHealth 通道；`auth.go` RBAC 中间件；`guardrails.go` 请求守卫——body 1MB/413、identities 2000 条/400、阿里云响应 4MB 拒读，调整限额只动这一个文件；`sync.go` 启动时把凭证同步到告警数据源，iam 的 `datasources:read/write` 是 Grafana 核心 action、不经生成器）
+- `pkg/ds/` 捆绑告警数据源后端（独立进程/二进制；`server/frames.go` 把 `service.Resolver.Snapshot` 的快照组织成告警可查的宽序列帧——字段白名单、IP 禁入；`authorize` 角色门禁复用 `handler.RoleHas`，评估态放行）
+- `provisioning/` Grafana 部署配置（plugins 启用 app；datasources 预置告警数据源实例 uid `ecs-ds`）

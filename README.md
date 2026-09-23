@@ -36,6 +36,20 @@ scrape target **不必**填 ECS 内网或公网 IP。对齐优先用主机名（
 2. 左侧 Apps → **ECS 资产**：列出 Prometheus 里出现过的机器，以及匹配到的 ECS ID / 规格 / 所属地域。
 3. 打开现有利用率 Dashboard，面板菜单 → **ECS 资产信息**：用当前变量走 Prometheus 再查阿里云。
 
+## Grafana 告警（Alerting）
+
+插件捆绑一个后端数据源 **ECS 资产（告警）**（`local-ecs-app-ds`，provisioning 自动预置为 uid `ecs-ds`），把后端快照暴露成告警规则可查询的数据帧。规则在 **Grafana Alerting UI 里自己创建**（资产页顶部有引导卡与跳转按钮），阈值随意调节：
+
+| 查询帧   | 字段                                                 | 示例                             |
+| -------- | ---------------------------------------------------- | -------------------------------- |
+| 资产到期 | `daysToExpire`（每台实例一个序列，实例身份在标签里） | `daysToExpire < 7` 到期提醒      |
+| 账户概览 | `availableAmount` / `couponAmount` / `billTotal`     | `availableAmount < 100` 余额不足 |
+
+- 快照缓存 5 分钟（SWR），规则评估间隔建议 ≥ 5m。
+- 凭证不用重录：app 后端启动时用 service account 把配置页保存的 AK 自动同步到数据源（两端均加密存储）。
+- 权限：`assets` 帧 `ecs:read`（Viewer 可读）；`account` 帧与插件 UI 同档，仅 Editor/Admin。注意告警实例的触发值对「能看告警的人」天然可见（财务数字进告警即具广播属性）。
+- 通知复用 Grafana 已有 contact point：规则打 labels → 通知策略路由，无需插件侧配置。
+
 ## 本地构建
 
 ```bash

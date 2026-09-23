@@ -28,7 +28,7 @@ type App struct {
 	authzClient *authz.EnforcementClientImpl
 }
 
-func NewApp(_ context.Context, _ backend.AppInstanceSettings) (instancemgmt.Instance, error) {
+func NewApp(ctx context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	a := &App{resolver: service.NewResolver()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ecs/enrich", a.requireAction(actionRead, a.handleEnrich))
@@ -36,6 +36,7 @@ func NewApp(_ context.Context, _ backend.AppInstanceSettings) (instancemgmt.Inst
 	mux.HandleFunc("/ecs/ak", a.requireAction(actionRead, a.handleAK))
 	mux.HandleFunc("/ecs/test", a.requireAction(actionReveal, a.handleTest))
 	a.CallResourceHandler = httpadapter.New(mux)
+	a.StartAlertingDatasourceSync(ctx, settings)
 	return a, nil
 }
 

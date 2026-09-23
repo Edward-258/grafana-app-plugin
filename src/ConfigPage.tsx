@@ -24,6 +24,9 @@ export type AppSettings = {
   instanceLabel?: string;
 };
 
+// 捆绑告警数据源：ID 与 webpack（pkg.name + "-ds"）、Go 侧（handler.PluginID + "-ds"）同源
+const dsPluginType = `${pluginJson.id}-ds`;
+
 type PluginSettings = {
   enabled?: boolean;
   pinned?: boolean;
@@ -59,6 +62,9 @@ export default function ConfigPage(_props: Props = {}) {
   const [secretConfigured, setSecretConfigured] = useState(false);
   const [prometheusUid, setPrometheusUid] = useState('');
   const [instanceLabel, setInstanceLabel] = useState('instance');
+  // 捆绑告警数据源（凭证同步目标）：uid 为 null 表示实例不存在（provisioning 未生效）
+  const [dsUid, setDsUid] = useState<string | null>(null);
+  const [dsCredsReady, setDsCredsReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -79,13 +85,25 @@ export default function ConfigPage(_props: Props = {}) {
         setSecretConfigured(Boolean(settings.secureJsonFields?.accessKeySecret));
         setAkSecureConfigured(Boolean(settings.secureJsonFields?.accessKeyId));
         setAk(akInfo);
+        if (canWrite) {
+          // 凭证同步目标探测：数据源列表仅 Admin 可读（与配置页写入门槛一致）
+          const all =
+            await getBackendSrv().get<Array<{ uid: string; type: string; secureJsonFields?: Record<string, boolean> }>>(
+              '/api/datasources'
+            );
+          const ds = all.find((d) => d.type === dsPluginType);
+          if (ds) {
+            setDsUid(ds.uid);
+            setDsCredsReady(Boolean(ds.secureJsonFields?.accessKeySecret));
+          }
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : '读取配置失败');
       } finally {
         setReady(true);
       }
     })();
-  }, []);
+  }, [canWrite]);
 
   const typedAK = newAccessKeyId.trim();
   const akConfigured = Boolean(ak.configured);
@@ -116,6 +134,8 @@ export default function ConfigPage(_props: Props = {}) {
         },
         secureJsonData: Object.keys(secure).length > 0 ? secure : undefined,
       });
+      // 告警数据源的凭证由后端自动同步（保存会重启插件进程、触发同步），
+      // 前端不搬运 Secret——本进程外的已存密文前端本就读不到。
       setMessage('已保存。Grafana 会重启插件后端进程。');
       window.location.reload();
     } catch (e) {
@@ -272,6 +292,17 @@ export default function ConfigPage(_props: Props = {}) {
         {ak.legacy && canWrite && (
           <Alert title="AccessKey ID 仍以旧格式保存" severity="info">
             点击「保存」即可把它迁移到加密存储（secureJsonData）。
+          </Alert>
+        )}
+        {canWrite && dsUid && !dsCredsReady && (
+          <Alert title="告警数据源凭证待同步" severity="info">
+            捆绑数据源「ECS 资产（告警）」尚未取得凭证，保存后插件后端会自动同步；若长期未生效请检查插件日志。
+          </Alert>
+        )}
+        {canWrite && !dsUid && (
+          <Alert title="告警数据源未实例化" severity="info">
+            捆绑数据源「ECS 资产（告警）」（{dsPluginType}）尚未创建，告警功能不可用。通常由 provisioning/datasources
+            自动预置，也可在「数据源 → 新建」手动选择本插件的数据源。
           </Alert>
         )}
         {message && (

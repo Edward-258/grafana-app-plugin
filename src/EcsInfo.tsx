@@ -49,7 +49,7 @@ export type Billing = {
   currency?: string;
   billingCycle?: string;
   billTotal?: number;
-  billItems?: { product: string; amount: number }[];
+  billItems?: Array<{ product: string; amount: number }>;
 };
 
 // 金额展示：后端已剥离千分位逗号并归一为数字，这里统一两位小数 + 本地化千分位

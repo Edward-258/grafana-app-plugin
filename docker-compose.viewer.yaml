@@ -11,7 +11,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_AUTH_DISABLE_LOGIN_FORM: 'false'
       GF_DEFAULT_APP_MODE: development
-      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: local-ecs-app
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: local-ecs-app,local-ecs-app-ds
       GF_SECURITY_SECRET_KEY: ${GF_SECURITY_SECRET_KEY:-}
       GF_LOG_LEVEL: info
       GF_FEATURE_TOGGLES_ENABLE: externalServiceAccounts

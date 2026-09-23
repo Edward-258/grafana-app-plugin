@@ -145,6 +145,18 @@ func (r *Resolver) Ensure(ctx context.Context, cfg Config) error {
 	return err
 }
 
+// Snapshot 返回全量资产与账户概览，供捆绑数据源（pkg/ds）组织告警可查询的
+// 数据帧。缓存语义与 Enrich 完全一致（SWR/单飞/全地域完整性约束）。
+// 帧字段由调用方白名单挑选——Instance 携带的 IP 字段不得出现在任何帧里。
+func (r *Resolver) Snapshot(ctx context.Context, cfg Config, force bool) ([]model.Instance, model.AccountOverview, error) {
+	list, err := r.instances(ctx, cfg, force)
+	if err != nil {
+		return nil, model.AccountOverview{}, err
+	}
+	ov, _ := r.Billing()
+	return list, ov, nil
+}
+
 // instances 是 stale-while-revalidate 的核心，三岔：
 //   - 新鲜（< TTL）→ 纯内存命中；
 //   - 过期但在硬上限内 → 立即返回旧快照，必要时单飞触发后台刷新；
