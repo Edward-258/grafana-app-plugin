@@ -13,8 +13,9 @@ test('资产列表 tab 渲染工具栏与刷新按钮', async ({ goto, page }) =
   await goto('/a/local-ecs-app?tab=assets');
 
   await expect(page.getByPlaceholder('搜索 ECS ID / 名称 / 规格 / 地域')).toBeVisible();
-  // 刷新按钮：点击沿原查询链路重跑（无数据源配置时落到错误提示，按钮本身常驻）
+  // 刷新按钮：点击沿原查询链路重跑（无数据源配置时落到错误提示，按钮本身常驻）。
+  // 冷缓存 + e2e 并发时后台要真跑一次阿里云全地域扫描，启用可能超过 20s。
   const refresh = page.getByRole('button', { name: '刷新资产列表' });
   await expect(refresh).toBeVisible();
-  await expect(refresh).toBeEnabled({ timeout: 20_000 });
+  await expect(refresh).toBeEnabled({ timeout: 45_000 });
 });

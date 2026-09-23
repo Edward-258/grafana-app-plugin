@@ -13,9 +13,15 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './tests/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? 2 : 1,
+  // 本地所有 worker 共享一个 CDP 浏览器进程：worker 过多会把进程内存压崩
+  //（Page crashed），Grafana 重启后并发首访还可能撞上插件模块加载失败
+  //（"App not found"，global-setup.ts 预热消掉大半）。CI 每 worker 独立
+  // launch 拓扑更稳，保持默认 workers 与 retries=2。
+  workers: process.env.CI ? undefined : 4,
   reporter: [['html', { open: 'never' }]],
   use: {
     baseURL: process.env.GRAFANA_URL || 'http://localhost:3000',
