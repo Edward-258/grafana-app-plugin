@@ -42,21 +42,33 @@ func assetsFrame(list []model.Instance, now time.Time) *data.Frame {
 	return data.NewFrame(string(frameAssets), fields...)
 }
 
-// accountFrame 账户概览单行宽表。BSS 整体软失败时 IsZero：保留同一 schema、
-// 值全 null（规则评估落到 NoData 状态，而不是帧结构漂移）。
+// accountFrame 账户概览单行宽序列。currency/billingCycle/metric 只能作为数值
+// 字段的 labels 存在——独立字符串列会把整帧判成 long 形态，SSE 直接拒收
+// （"input data must be a wide series"，见 spec §10.14）。metric 标签区分同帧
+// 的三条序列：Grafana 要求告警实例的标签集唯一，没有它 reduce 结果会因
+// labels 撞车被整体拒绝。labels 随告警实例带出。BSS 整体软失败时 IsZero：
+// 保留同一 schema、值全 null（规则评估落到 NoData 状态，而不是帧结构漂移）。
 func accountFrame(ov model.AccountOverview, now time.Time) *data.Frame {
 	avail, coupon, bill := ptr(ov.Available), ptr(ov.Coupon), ptr(ov.BillTotal)
 	if ov.IsZero() {
 		avail, coupon, bill = nil, nil, nil
 	}
+	labels := func(metric string) data.Labels {
+		l := data.Labels{"metric": metric}
+		if ov.Currency != "" {
+			l["currency"] = ov.Currency
+		}
+		if ov.BillingCycle != "" {
+			l["billingCycle"] = ov.BillingCycle
+		}
+		return l
+	}
 	return data.NewFrame(
 		string(frameAccount),
 		data.NewField("time", nil, []time.Time{now}),
-		data.NewField("availableAmount", nil, []*float64{avail}),
-		data.NewField("couponAmount", nil, []*float64{coupon}),
-		data.NewField("billTotal", nil, []*float64{bill}),
-		data.NewField("currency", nil, []string{ov.Currency}),
-		data.NewField("billingCycle", nil, []string{ov.BillingCycle}),
+		data.NewField("availableAmount", labels("availableAmount"), []*float64{avail}),
+		data.NewField("couponAmount", labels("couponAmount"), []*float64{coupon}),
+		data.NewField("billTotal", labels("billTotal"), []*float64{bill}),
 	)
 }
 

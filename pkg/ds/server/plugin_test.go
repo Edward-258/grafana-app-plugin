@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/data"
 
 	"local-ecs-app/pkg/aliyun/model"
 )
@@ -132,11 +133,39 @@ func TestAccountFrameSchemaStable(t *testing.T) {
 			t.Fatalf("字段序漂移：%s vs %s", empty.Fields[i].Name, full.Fields[i].Name)
 		}
 	}
+	// 回归守护：帧里混入字符串列会被 Grafana 判成 long 形态，SSE 直接拒收
+	//（"input data must be a wide series but got type long"），只允许 time+数值。
+	for _, f := range full.Fields {
+		ft := f.Type()
+		numeric := false
+		for _, nt := range data.NumericFieldTypes() {
+			if ft == nt {
+				numeric = true
+				break
+			}
+		}
+		if ft != data.FieldTypeTime && !numeric {
+			t.Fatalf("account 帧混入非数值列 %s (%v)，告警引擎会拒收", f.Name, ft)
+		}
+	}
 	if got := *full.Fields[1].At(0).(*float64); got != 7.36 {
 		t.Fatalf("availableAmount = %v", got)
 	}
+	// metric 标签区分三条序列：Grafana 要求告警实例标签集唯一，缺它会因
+	// labels 撞车整体拒绝
+	for i, want := range []string{"availableAmount", "couponAmount", "billTotal"} {
+		if got := full.Fields[i+1].Labels["metric"]; got != want {
+			t.Fatalf("字段 %d metric 标签 = %q, 期望 %q", i+1, got, want)
+		}
+	}
+	if full.Fields[1].Labels["currency"] != "CNY" || full.Fields[1].Labels["billingCycle"] != "2026-09" {
+		t.Fatalf("币种/账期应走字段标签: %v", full.Fields[1].Labels)
+	}
 	if !empty.NilAt(1, 0) {
 		t.Fatal("零值概览应全 null（规则评估落到 NoData）")
+	}
+	if len(empty.Fields[1].Labels) != 1 {
+		t.Fatal("空概览应只剩 metric 标签（币种/账期为空不产生标签）")
 	}
 }
 
