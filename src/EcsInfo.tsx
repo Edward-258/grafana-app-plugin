@@ -39,6 +39,28 @@ export function fmtTime(iso?: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// 账户概览（BSS：余额/代金券/当月账单聚合）；仅 ecs:reveal 的会话后端才下发，
+// Viewer 拿到的响应里没有这个对象——前端所有展示都以"有数据才显示"为门。
+export type Billing = {
+  available: number;
+  cash?: number;
+  credit?: number;
+  coupon?: number;
+  currency?: string;
+  billingCycle?: string;
+  billTotal?: number;
+  billItems?: { product: string; amount: number }[];
+};
+
+// 金额展示：后端已剥离千分位逗号并归一为数字，这里统一两位小数 + 本地化千分位
+export function fmtMoney(n?: number, currency?: string): string {
+  if (n == null) {
+    return '—';
+  }
+  const prefix = currency === 'CNY' ? '¥' : currency ? `${currency} ` : '';
+  return `${prefix}${n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export function chargeLabel(t?: string): string {
   if (t === 'PrePaid') {
     return '包年包月';
@@ -54,6 +76,7 @@ type ResolveResponse = {
   monitorName?: string;
   note?: string;
   instance?: EcsAsset;
+  billing?: Billing;
   error?: string;
 };
 
@@ -83,7 +106,7 @@ export function currentDashboardQuery(): string {
   return '';
 }
 
-export function EcsFields({ instance }: { instance: EcsAsset }) {
+export function EcsFields({ instance, billing }: { instance: EcsAsset; billing?: Billing | null }) {
   const styles = useStyles2(getStyles);
   return (
     <dl className={styles.fields}>
@@ -119,7 +142,11 @@ export function EcsFields({ instance }: { instance: EcsAsset }) {
       <dt>到期时间</dt>
       <dd>
         {instance.chargeType === 'PostPaid' ? (
-          <span className={styles.muted}>按量付费无固定到期</span>
+          billing && billing.available > 0 ? (
+            `按量付费（余额 ${fmtMoney(billing.available, billing.currency)}）`
+          ) : (
+            <span className={styles.muted}>按量付费无固定到期</span>
+          )
         ) : (
           fmtTime(instance.expiredTime)
         )}
@@ -190,7 +217,7 @@ export function EcsModalBody({ onDismiss }: { onDismiss?: () => void }) {
       )}
       {data?.instance && (
         <>
-          <EcsFields instance={data.instance} />
+          <EcsFields instance={data.instance} billing={data.billing} />
           <p className={styles.muted}>已与当前 Dashboard 的 Prometheus 实例对齐</p>
         </>
       )}

@@ -53,7 +53,17 @@ func (a *App) handleResolve(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		resp["instance"] = asset
 	}
+	a.attachBilling(resp, r)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// attachBilling 下发账户概览（余额/代金券/当月账单）：仅 ecs:reveal
+//（Editor/Admin）可见——财务信息不对 Viewer 开放（2026-09-23 拍板）。
+// BSS 整体软失败时缺省，对所有角色一致。
+func (a *App) attachBilling(resp map[string]any, r *http.Request) {
+	if ov, ok := a.resolver.Billing(); ok && a.hasAction(r, actionReveal) {
+		resp["billing"] = ov
+	}
 }
 
 func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +90,11 @@ func (a *App) handleEnrich(w http.ResponseWriter, r *http.Request) {
 		fail(w, err, nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"instances": out})
+	resp := map[string]any{"instances": out}
+	// 账户概览（余额/代金券/当月账单聚合，按量付费资源共同消耗余额池）随响应
+	// 下发；仅 ecs:reveal 可见，BSS 整体软失败时缺省
+	a.attachBilling(resp, r)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (a *App) handleTest(w http.ResponseWriter, r *http.Request) {

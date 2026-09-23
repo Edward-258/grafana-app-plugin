@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -110,6 +112,84 @@ func (c *Client) describe(ctx context.Context, region string, page, size int) ([
 		out = append(out, raw.toInstance())
 	}
 	return out, parsed.TotalCount, nil
+}
+
+// AccountBalance 取账户余额概览（可用/现金/信用，来自 QueryAccountBalance）
+// 并叠加有效代金券余额（QueryCashCoupons）——代金券查询软失败记 0，
+// 不影响余额主数据（cloudscope 同款取舍）。
+func (c *Client) AccountBalance(ctx context.Context) (model.AccountOverview, error) {
+	var ov model.AccountOverview
+	body, err := c.call(ctx, bssEndpoint, map[string]string{
+		"Action":  "QueryAccountBalance",
+		"Version": "2017-12-14",
+	})
+	if err != nil {
+		return ov, err
+	}
+	var bal accountBalanceResponse
+	if err := json.Unmarshal(body, &bal); err != nil {
+		return ov, fmt.Errorf("解析 BSS 余额响应失败: %w", err)
+	}
+	ov.Available = model.ParseMoney(bal.Data.AvailableAmount)
+	ov.Cash = model.ParseMoney(bal.Data.AvailableCashAmount)
+	ov.Credit = model.ParseMoney(bal.Data.CreditAmount)
+	ov.Currency = bal.Data.Currency
+
+	if cbody, err := c.call(ctx, bssEndpoint, map[string]string{
+		"Action":         "QueryCashCoupons",
+		"Version":        "2017-12-14",
+		"EffectiveOrNot": "true",
+	}); err == nil {
+		var cp cashCouponsResponse
+		if json.Unmarshal(cbody, &cp) == nil {
+			for _, coupon := range cp.Data.CashCoupon {
+				ov.Coupon += model.ParseMoney(coupon.Balance)
+			}
+		}
+	}
+	return ov, nil
+}
+
+// MonthlyBill 按 cycle（YYYY-MM）聚合实例账单（QueryInstanceBill，实付口径），
+// 按产品分组求和、金额降序。分页 PageSize=300、上限 20 页与 List 的取舍一致。
+func (c *Client) MonthlyBill(ctx context.Context, cycle string) ([]model.BillItem, error) {
+	agg := map[string]float64{}
+	seen := 0 // TotalCount 为全口径，按见过的行数翻页
+	for page := 1; page <= 20; page++ {
+		body, err := c.call(ctx, bssEndpoint, map[string]string{
+			"Action":       "QueryInstanceBill",
+			"Version":      "2017-12-14",
+			"BillingCycle": cycle,
+			"PageNum":      strconv.Itoa(page),
+			"PageSize":     "300",
+		})
+		if err != nil {
+			return nil, err
+		}
+		var parsed instanceBillResponse
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, fmt.Errorf("解析 BSS 账单响应失败: %w", err)
+		}
+		for _, it := range parsed.Data.Items.Item {
+			name := it.ProductName
+			if name == "" {
+				name = it.PipCode
+			}
+			agg[name] += model.ParseMoneyAny(it.PretaxAmount)
+		}
+		seen += len(parsed.Data.Items.Item)
+		if seen >= parsed.Data.TotalCount || len(parsed.Data.Items.Item) == 0 {
+			break
+		}
+	}
+	out := make([]model.BillItem, 0, len(agg))
+	for product, amount := range agg {
+		if amount > 0 {
+			out = append(out, model.BillItem{Product: product, Amount: math.Round(amount*100) / 100})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Amount > out[j].Amount })
+	return out, nil
 }
 
 // maxResponseBytes 单个阿里云响应的读取上限。分页 PageSize=100 时单页响应

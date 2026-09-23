@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -40,15 +41,20 @@ type Resolver struct {
 	cache *ecsCache
 	// fetch 抽象"全量拉取"动作以便测试注入；生产实现是阿里云全地域扫描。
 	fetch func(ctx context.Context, cfg Config) ([]model.Instance, error)
-	// fetchBss 是 BSS「已购资源」补充链路（精确创建时间，订单口径）。
-	// 失败软降级：日志告警后保留 ECS CreationTime，不打断资产主链路。
+	// fetchBss 是 BSS「已购资源」补充链路（订单口径租赁开始时间）。
+	// 失败软降级：日志告警后字段留空，不打断资产主链路。
 	fetchBss func(ctx context.Context, cfg Config) (map[string]string, error)
+	// fetchBilling 是 BSS 账户概览链路（余额/代金券/当月账单聚合）。
+	// 同样软降级：部分失败保留已得数据，整体失败置零省略下发。
+	fetchBilling func(ctx context.Context, cfg Config) (model.AccountOverview, error)
 }
 
 type ecsCache struct {
-	key        string
-	at         time.Time
-	instances  []model.Instance
+	key       string
+	at        time.Time
+	instances []model.Instance
+	// 账户概览（余额/代金券/当月账单）是账户级数据，随快照一起缓存（同一 AK 键下同生共死）
+	billing    model.AccountOverview
 	refreshing bool // 单飞标记：一轮后台刷新在飞时不重复触发
 }
 
@@ -59,6 +65,24 @@ func NewResolver() *Resolver {
 		},
 		fetchBss: func(ctx context.Context, cfg Config) (map[string]string, error) {
 			return client.New(cfg).CreationTimes(ctx)
+		},
+		fetchBilling: func(ctx context.Context, cfg Config) (model.AccountOverview, error) {
+			c := client.New(cfg)
+			ov, err := c.AccountBalance(ctx)
+			if err != nil {
+				return model.AccountOverview{}, err
+			}
+			cycle := time.Now().Format("2006-01")
+			items, err := c.MonthlyBill(ctx, cycle)
+			if err != nil {
+				return ov, fmt.Errorf("余额已取、账单失败: %w", err)
+			}
+			ov.BillingCycle = cycle
+			for _, it := range items {
+				ov.BillTotal += it.Amount
+			}
+			ov.BillItems = items
+			return ov, nil
 		},
 	}
 }
@@ -102,8 +126,18 @@ func (r *Resolver) Test(ctx context.Context, cfg Config) (int, int, error) {
 		return 0, 0, err
 	}
 	r.applyBss(ctx, cfg, list) // 与正常快照同一合入规则，保证缓存语义一致
-	r.store(cfg, list)
+	r.store(cfg, list, r.applyBilling(ctx, cfg))
 	return len(list), len(model.RegionSet(list)), nil
+}
+
+// Billing 返回最近一次快照携带的账户概览（无缓存/整体软失败时 ok=false）。
+func (r *Resolver) Billing() (model.AccountOverview, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c := r.cache; c != nil && !c.billing.IsZero() {
+		return c.billing, true
+	}
+	return model.AccountOverview{}, false
 }
 
 func (r *Resolver) Ensure(ctx context.Context, cfg Config) error {
@@ -151,8 +185,18 @@ func (r *Resolver) refresh(ctx context.Context, cfg Config) ([]model.Instance, e
 		return nil, err
 	}
 	r.applyBss(ctx, cfg, list)
-	r.store(cfg, list)
+	r.store(cfg, list, r.applyBilling(ctx, cfg))
 	return list, nil
+}
+
+// applyBilling 取账户概览（余额/代金券/当月账单），软失败返回零值；
+// 部分失败时 fetchBilling 已尽量保留已得数据（如余额成功账单失败）。
+func (r *Resolver) applyBilling(ctx context.Context, cfg Config) model.AccountOverview {
+	ov, err := r.fetchBilling(ctx, cfg)
+	if err != nil {
+		log.DefaultLogger.Error("BSS 账户概览部分失败，保留已得数据", "error", err)
+	}
+	return ov
 }
 
 // applyBss 把 BSS 订单口径的开通时间写入快照的 LeaseStartTime（独立字段，
@@ -178,6 +222,10 @@ func (r *Resolver) backgroundRefresh(cfg Config) {
 	if err == nil {
 		r.applyBss(context.Background(), cfg, list)
 	}
+	var billing model.AccountOverview
+	if err == nil {
+		billing = r.applyBilling(context.Background(), cfg)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c := r.cache
@@ -189,11 +237,17 @@ func (r *Resolver) backgroundRefresh(cfg Config) {
 		log.DefaultLogger.Error("后台刷新资产列表失败，继续使用旧快照", "error", err)
 		return
 	}
-	r.cache = &ecsCache{key: cfg.AccessKeyID, at: time.Now(), instances: list}
+	r.cache = &ecsCache{
+		key: cfg.AccessKeyID, at: time.Now(), instances: list,
+		billing: billing,
+	}
 }
 
-func (r *Resolver) store(cfg Config, list []model.Instance) {
+func (r *Resolver) store(cfg Config, list []model.Instance, billing model.AccountOverview) {
 	r.mu.Lock()
-	r.cache = &ecsCache{key: cfg.AccessKeyID, at: time.Now(), instances: list}
+	r.cache = &ecsCache{
+		key: cfg.AccessKeyID, at: time.Now(), instances: list,
+		billing: billing,
+	}
 	r.mu.Unlock()
 }

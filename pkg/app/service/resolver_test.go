@@ -16,6 +16,9 @@ func newTestResolver(fetch func(ctx context.Context, cfg Config) ([]model.Instan
 	r.fetch = fetch
 	// 默认屏蔽 BSS 真实网络调用；需要 BSS 语义的用例自行覆写
 	r.fetchBss = func(context.Context, Config) (map[string]string, error) { return nil, nil }
+	r.fetchBilling = func(context.Context, Config) (model.AccountOverview, error) {
+		return model.AccountOverview{}, nil
+	}
 	return r
 }
 
@@ -80,7 +83,7 @@ func TestStaleServesOldThenBackgroundReplaces(t *testing.T) {
 		return []model.Instance{{InstanceID: "i-new"}}, nil
 	})
 	cfg := Config{AccessKeyID: "ak"}
-	r.store(cfg, []model.Instance{{InstanceID: "i-old"}})
+	r.store(cfg, []model.Instance{{InstanceID: "i-old"}}, model.AccountOverview{})
 	r.cache.at = time.Now().Add(-2 * cacheTTL)
 
 	got, err := r.instances(context.Background(), cfg, false)
@@ -102,7 +105,7 @@ func TestStaleSingleFlight(t *testing.T) {
 		return []model.Instance{{InstanceID: "i-new"}}, nil
 	})
 	cfg := Config{AccessKeyID: "ak"}
-	r.store(cfg, []model.Instance{{InstanceID: "i-old"}})
+	r.store(cfg, []model.Instance{{InstanceID: "i-old"}}, model.AccountOverview{})
 	r.cache.at = time.Now().Add(-2 * cacheTTL)
 
 	var wg sync.WaitGroup
@@ -132,7 +135,7 @@ func TestHardStaleCapBlocks(t *testing.T) {
 		return []model.Instance{{InstanceID: "i-new"}}, nil
 	})
 	cfg := Config{AccessKeyID: "ak"}
-	r.store(cfg, []model.Instance{{InstanceID: "i-old"}})
+	r.store(cfg, []model.Instance{{InstanceID: "i-old"}}, model.AccountOverview{})
 	r.cache.at = time.Now().Add(-(hardStaleCap + time.Minute))
 
 	got, err := r.instances(context.Background(), cfg, false)
@@ -154,7 +157,7 @@ func TestBackgroundFailureKeepsStaleAndRetries(t *testing.T) {
 		return []model.Instance{{InstanceID: "i-new"}}, nil
 	})
 	cfg := Config{AccessKeyID: "ak"}
-	r.store(cfg, []model.Instance{{InstanceID: "i-old"}})
+	r.store(cfg, []model.Instance{{InstanceID: "i-old"}}, model.AccountOverview{})
 	r.cache.at = time.Now().Add(-2 * cacheTTL)
 
 	got, err := r.instances(context.Background(), cfg, false)
@@ -191,7 +194,7 @@ func TestForceRefreshBypassesFreshCache(t *testing.T) {
 		return []model.Instance{{InstanceID: "i-new"}}, nil
 	})
 	cfg := Config{AccessKeyID: "ak"}
-	r.store(cfg, []model.Instance{{InstanceID: "i-old"}}) // 此刻缓存新鲜
+	r.store(cfg, []model.Instance{{InstanceID: "i-old"}}, model.AccountOverview{}) // 此刻缓存新鲜
 
 	// 新鲜期普通读：纯内存命中
 	got, err := r.instances(context.Background(), cfg, false)
@@ -265,5 +268,50 @@ func TestBssFailureKeepsEcsTime(t *testing.T) {
 	got, err := r.instances(context.Background(), Config{AccessKeyID: "ak"}, false)
 	if err != nil || got[0].CreationTime != "2026-01-01T00:00Z" || got[0].LeaseStartTime != "" {
 		t.Fatalf("BSS 失败应留空 leaseStart 且保留 ECS 时间, got %v err=%v", got, err)
+	}
+}
+
+// 账户概览随快照缓存：冷启动写入、Billing() 读出、整体软失败 ok=false。
+func TestBillingRidesSnapshot(t *testing.T) {
+	r := newTestResolver(func(_ context.Context, _ Config) ([]model.Instance, error) {
+		return []model.Instance{{InstanceID: "i-x"}}, nil
+	})
+	r.fetchBilling = func(context.Context, Config) (model.AccountOverview, error) {
+		return model.AccountOverview{
+			Available: 7.36, Coupon: 1.5, Currency: "CNY",
+			BillingCycle: "2026-09", BillTotal: 108.13,
+			BillItems: []model.BillItem{{Product: "云服务器", Amount: 108.13}},
+		}, nil
+	}
+	cfg := Config{AccessKeyID: "ak"}
+
+	if _, err := r.instances(context.Background(), cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	ov, ok := r.Billing()
+	if !ok || ov.Available != 7.36 || ov.Coupon != 1.5 || ov.BillTotal != 108.13 || len(ov.BillItems) != 1 {
+		t.Fatalf("概览应随快照可读, got %+v ok=%v", ov, ok)
+	}
+
+	// 部分失败：余额成功、账单失败 → 保留余额部分
+	r.fetchBilling = func(context.Context, Config) (model.AccountOverview, error) {
+		return model.AccountOverview{Available: 7.36, Currency: "CNY"}, errors.New("账单失败")
+	}
+	if _, err := r.instances(context.Background(), cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	if ov, ok := r.Billing(); !ok || ov.Available != 7.36 || ov.BillTotal != 0 {
+		t.Fatalf("部分失败应保留余额, got %+v ok=%v", ov, ok)
+	}
+
+	// 整体软失败：零概览 → ok=false
+	r.fetchBilling = func(context.Context, Config) (model.AccountOverview, error) {
+		return model.AccountOverview{}, errors.New("bss 全挂")
+	}
+	if _, err := r.instances(context.Background(), cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Billing(); ok {
+		t.Fatal("零概览应 ok=false")
 	}
 }
