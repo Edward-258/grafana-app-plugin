@@ -45,20 +45,18 @@ func assetsFrame(list []model.Instance, now time.Time) *data.Frame {
 // accountFrame 账户概览单行宽表。BSS 整体软失败时 IsZero：保留同一 schema、
 // 值全 null（规则评估落到 NoData 状态，而不是帧结构漂移）。
 func accountFrame(ov model.AccountOverview, now time.Time) *data.Frame {
-	amounts := []*float64{ptr(ov.Available), ptr(ov.Coupon), ptr(ov.BillTotal)}
+	avail, coupon, bill := ptr(ov.Available), ptr(ov.Coupon), ptr(ov.BillTotal)
 	if ov.IsZero() {
-		amounts = []*float64{nil, nil, nil}
+		avail, coupon, bill = nil, nil, nil
 	}
-	currency := []string{ov.Currency}
-	cycle := []string{ov.BillingCycle}
 	return data.NewFrame(
 		string(frameAccount),
 		data.NewField("time", nil, []time.Time{now}),
-		data.NewField("availableAmount", nil, amounts[0:1]),
-		data.NewField("couponAmount", nil, amounts[1:2]),
-		data.NewField("billTotal", nil, amounts[2:3]),
-		data.NewField("currency", nil, currency),
-		data.NewField("billingCycle", nil, cycle),
+		data.NewField("availableAmount", nil, []*float64{avail}),
+		data.NewField("couponAmount", nil, []*float64{coupon}),
+		data.NewField("billTotal", nil, []*float64{bill}),
+		data.NewField("currency", nil, []string{ov.Currency}),
+		data.NewField("billingCycle", nil, []string{ov.BillingCycle}),
 	)
 }
 

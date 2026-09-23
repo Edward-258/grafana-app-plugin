@@ -40,7 +40,7 @@ export class DataSource extends DataSourceApi<EcsQuery, EcsDataSourceOptions> {
           to: String(range?.to.valueOf() ?? 0),
           queries: options.targets.map((t) => ({
             ...t,
-            datasource: this.getRef(),
+            datasource: { uid: this.dsSettings.uid, type: this.dsSettings.type },
             maxDataPoints: options.maxDataPoints,
             intervalMs: options.intervalMs,
           })),
@@ -49,8 +49,6 @@ export class DataSource extends DataSourceApi<EcsQuery, EcsDataSourceOptions> {
       .pipe(map((rsp) => rsp.data));
   }
 
-  // 与基类运行时默认行为一致：打后端 CheckHealth。非 2xx 会抛错，
-  // 由数据源测试页统一呈现。
   async testDatasource(): Promise<TestDataSourceResponse> {
     const rsp = await lastValueFrom(
       getBackendSrv().fetch<{ status: string; message?: string }>({
@@ -58,14 +56,5 @@ export class DataSource extends DataSourceApi<EcsQuery, EcsDataSourceOptions> {
       })
     );
     return { status: rsp.data.status, message: rsp.data.message ?? '' };
-  }
-
-  // 帧由后端组织，前端不做模板变量展开。
-  applyTemplateVariables(query: EcsQuery): EcsQuery {
-    return query;
-  }
-
-  getRef(): { uid: string; type: string } {
-    return { uid: this.dsSettings.uid, type: this.dsSettings.type };
   }
 }

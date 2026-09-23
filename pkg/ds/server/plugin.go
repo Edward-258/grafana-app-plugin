@@ -102,20 +102,18 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 			resp.Responses[q.RefID] = backend.DataResponse{Error: err}
 			continue
 		}
-		resp.Responses[q.RefID] = d.snapshot(ctx, cfg, kind)
+		instances, billing, err := d.resolver.Snapshot(ctx, cfg, false)
+		if err != nil {
+			resp.Responses[q.RefID] = backend.DataResponse{Error: err}
+			continue
+		}
+		if kind == frameAccount {
+			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{accountFrame(billing, timeNow())}}
+		} else {
+			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{assetsFrame(instances, timeNow())}}
+		}
 	}
 	return resp, nil
-}
-
-func (d *Datasource) snapshot(ctx context.Context, cfg service.Config, kind frameKind) backend.DataResponse {
-	instances, billing, err := d.resolver.Snapshot(ctx, cfg, false)
-	if err != nil {
-		return backend.DataResponse{Error: err}
-	}
-	if kind == frameAccount {
-		return backend.DataResponse{Frames: data.Frames{accountFrame(billing, timeNow())}}
-	}
-	return backend.DataResponse{Frames: data.Frames{assetsFrame(instances, timeNow())}}
 }
 
 func (d *Datasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {

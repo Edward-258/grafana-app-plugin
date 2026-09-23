@@ -80,18 +80,29 @@ func (a *App) syncAlertingDatasource(ctx context.Context, appURL, token string, 
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	appURL = strings.TrimRight(appURL, "/") // AppURL 带尾斜杠，直接拼接会产生 //api/... 404（同 auth.go JWksURL 先例）
-	do := func(method, url string, body any) (*http.Response, error) {
+	callJSON := func(method, url string, body, out any) error {
 		var buf bytes.Buffer
 		if body != nil {
 			_ = json.NewEncoder(&buf).Encode(body)
 		}
 		req, err := http.NewRequestWithContext(ctx, method, appURL+url, &buf)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
-		return client.Do(req)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s %s: HTTP %d", method, url, resp.StatusCode)
+		}
+		if out == nil {
+			return nil
+		}
+		return json.NewDecoder(resp.Body).Decode(out)
 	}
 
 	// 数据源实例 uid 不做硬编码（provisioning 之外的安装可能不同）：按类型从
@@ -100,16 +111,8 @@ func (a *App) syncAlertingDatasource(ctx context.Context, appURL, token string, 
 		UID  string `json:"uid"`
 		Type string `json:"type"`
 	}
-	resp, err := do(http.MethodGet, "/api/datasources", nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("列出数据源失败: HTTP %d", resp.StatusCode)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return err
+	if err := callJSON(http.MethodGet, "/api/datasources", nil, &list); err != nil {
+		return fmt.Errorf("列出数据源失败: %w", err)
 	}
 	uid := ""
 	for _, d := range list {
@@ -122,66 +125,32 @@ func (a *App) syncAlertingDatasource(ctx context.Context, appURL, token string, 
 		return fmt.Errorf("未找到类型为 %s 的数据源实例（provisioning 未生效或被删除）", AlertingDatasourceType)
 	}
 
-	var cur struct {
-		Name            string          `json:"name"`
-		Type            string          `json:"type"`
-		Access          string          `json:"access"`
-		URL             string          `json:"url"`
-		Database        string          `json:"database"`
-		IsDefault       bool            `json:"isDefault"`
-		BasicAuth       bool            `json:"basicAuth"`
-		BasicAuthUser   string          `json:"basicAuthUser"`
-		WithCredentials bool            `json:"withCredentials"`
-		JSONData        map[string]any  `json:"jsonData"`
-		SecureFields    map[string]bool `json:"secureJsonFields"`
+	// 读全量 → 改两键 → 原样写回。更新接口忽略响应里的多余字段（id/version
+	// 等），因此整体回传，无需逐字段复制。
+	var cur map[string]any
+	if err := callJSON(http.MethodGet, "/api/datasources/uid/"+uid, nil, &cur); err != nil {
+		return fmt.Errorf("读取数据源 %s 失败: %w", uid, err)
 	}
-	dresp, err := do(http.MethodGet, "/api/datasources/uid/"+uid, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dresp.Body.Close() }()
-	if dresp.StatusCode != http.StatusOK {
-		return fmt.Errorf("读取数据源 %s 失败: HTTP %d", uid, dresp.StatusCode)
-	}
-	if err := json.NewDecoder(dresp.Body).Decode(&cur); err != nil {
-		return err
-	}
-
+	secure, _ := cur["secureJsonFields"].(map[string]any)
+	jsonData, _ := cur["jsonData"].(map[string]any)
 	// 幂等：ds 侧凭证已配置且 AK 哈希一致时跳过（每次启动都写会无谓地触发
 	// ds 实例重建）；换 AK（哈希变化）则重同步。
 	sum := sha256.Sum256([]byte(cfg.AccessKeyID))
 	akHash := hex.EncodeToString(sum[:])[:16]
-	if cur.SecureFields["accessKeyId"] && cur.SecureFields["accessKeySecret"] && cur.JSONData[akHashKey] == akHash {
+	if secure["accessKeyId"] == true && secure["accessKeySecret"] == true && jsonData[akHashKey] == akHash {
 		return nil
 	}
-	jsonData := cur.JSONData
 	if jsonData == nil {
 		jsonData = map[string]any{}
 	}
 	jsonData[akHashKey] = akHash
-	payload := map[string]any{
-		"name":            cur.Name,
-		"type":            cur.Type,
-		"access":          cur.Access,
-		"url":             cur.URL,
-		"database":        cur.Database,
-		"isDefault":       cur.IsDefault,
-		"basicAuth":       cur.BasicAuth,
-		"basicAuthUser":   cur.BasicAuthUser,
-		"withCredentials": cur.WithCredentials,
-		"jsonData":        jsonData,
-		"secureJsonData": map[string]string{
-			"accessKeyId":     cfg.AccessKeyID,
-			"accessKeySecret": cfg.AccessKeySecret,
-		},
+	cur["jsonData"] = jsonData
+	cur["secureJsonData"] = map[string]string{
+		"accessKeyId":     cfg.AccessKeyID,
+		"accessKeySecret": cfg.AccessKeySecret,
 	}
-	uresp, err := do(http.MethodPut, "/api/datasources/uid/"+uid, payload)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = uresp.Body.Close() }()
-	if uresp.StatusCode != http.StatusOK {
-		return fmt.Errorf("更新数据源 %s 失败: HTTP %d", uid, uresp.StatusCode)
+	if err := callJSON(http.MethodPut, "/api/datasources/uid/"+uid, cur, nil); err != nil {
+		return fmt.Errorf("更新数据源 %s 失败: %w", uid, err)
 	}
 	return nil
 }
