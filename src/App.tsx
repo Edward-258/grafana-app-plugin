@@ -5,11 +5,13 @@ import { PluginPage, getBackendSrv } from '@grafana/runtime';
 import { Alert, Button, FilterInput, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
 import ConfigPage from './ConfigPage';
-import { EcsAsset, EcsFields, fmtTime } from './EcsInfo';
+import { Billing, EcsAsset, EcsFields, fmtMoney, fmtTime } from './EcsInfo';
 import { identitiesFromPrometheus, loadSettings } from './prom';
 
 type ListResponse = {
   instances?: EcsAsset[];
+  // 账户概览（BSS：余额/代金券/当月账单聚合）；仅 ecs:reveal 会话下发，整体软失败时缺省
+  billing?: Billing;
   error?: string;
 };
 
@@ -29,6 +31,7 @@ export default function App({ query }: AppProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [instances, setInstances] = useState<EcsAsset[]>([]);
+  const [billing, setBilling] = useState<Billing | null>(null);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<EcsAsset | null>(null);
   // 手动刷新计数器：+1 让下面的 effect 重跑一次查询链路；forceRef 标记"本次
@@ -60,6 +63,7 @@ export default function App({ query }: AppProps) {
           refresh: force,
         });
         setInstances(res.instances || []);
+        setBilling(res.billing ?? null);
       } catch (e) {
         setError(e instanceof Error ? e.message : '加载失败');
       } finally {
@@ -106,6 +110,32 @@ export default function App({ query }: AppProps) {
 
       {tab === 'assets' && (
         <>
+          {billing && (
+            <div className={styles.overview}>
+              <span>
+                账户余额 <b>{fmtMoney(billing.available, billing.currency)}</b>
+              </span>
+              {billing.coupon ? (
+                <span>
+                  代金券 <b>{fmtMoney(billing.coupon, billing.currency)}</b>
+                </span>
+              ) : null}
+              {billing.billTotal ? (
+                <span>
+                  {billing.billingCycle} 消费（实付） <b>{fmtMoney(billing.billTotal, billing.currency)}</b>
+                </span>
+              ) : null}
+              {billing.billItems && billing.billItems.length > 0 && (
+                <span className={styles.overviewItems}>
+                  {billing.billItems
+                    .slice(0, 4)
+                    .map((it) => `${it.product} ${fmtMoney(it.amount, billing.currency)}`)
+                    .join(' · ')}
+                  {billing.billItems.length > 4 ? ` 等 ${billing.billItems.length} 项` : ''}
+                </span>
+              )}
+            </div>
+          )}
           <div className={styles.toolbar}>
             <FilterInput placeholder="搜索 ECS ID / 名称 / 规格 / 地域" value={filter} onChange={setFilter} />
             <Button
@@ -166,7 +196,13 @@ export default function App({ query }: AppProps) {
                     <td>{row.regionId || '—'}</td>
                     <td>{fmtTime(row.creationTime)}</td>
                     <td>{row.leaseStart ? fmtTime(row.leaseStart) : <span className={styles.note}>—</span>}</td>
-                    <td>{row.chargeType === 'PostPaid' ? '按量付费' : fmtTime(row.expiredTime)}</td>
+                    <td>
+                      {row.chargeType === 'PostPaid'
+                        ? billing && billing.available > 0
+                          ? `按量付费（余额 ${fmtMoney(billing.available, billing.currency)}）`
+                          : '按量付费'
+                        : fmtTime(row.expiredTime)}
+                    </td>
                     <td>{row.cpu || '—'}</td>
                     <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
                   </tr>
@@ -177,7 +213,7 @@ export default function App({ query }: AppProps) {
 
           {selected?.instanceId && (
             <div className={styles.detail}>
-              <EcsFields instance={selected} />
+              <EcsFields instance={selected} billing={billing} />
             </div>
           )}
         </>
@@ -187,6 +223,24 @@ export default function App({ query }: AppProps) {
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
+  overview: css({
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: theme.spacing(2),
+    alignItems: 'baseline',
+    marginBottom: theme.spacing(2),
+    padding: theme.spacing(1, 2),
+    background: theme.colors.background.secondary,
+    borderRadius: theme.shape.radius.default,
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.text.secondary,
+    b: { color: theme.colors.text.primary, fontFamily: theme.typography.fontFamilyMonospace },
+  }),
+  overviewItems: css({
+    color: theme.colors.text.secondary,
+    basis: '100%',
+    fontSize: theme.typography.bodySmall.fontSize,
+  }),
   toolbar: css({
     display: 'flex',
     gap: theme.spacing(2),

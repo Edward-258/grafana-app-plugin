@@ -58,10 +58,10 @@ func (i Instance) Public() PublicAsset {
 		MemoryGiB:    i.MemoryGiB,
 		ZoneID:       i.ZoneID,
 		RegionID:     i.RegionID,
-		CreationTime:   i.CreationTime,
-		ExpiredTime:    i.ExpiredTime,
-		ChargeType:     i.ChargeType,
-		LeaseStart:     i.LeaseStartTime,
+		CreationTime: i.CreationTime,
+		ExpiredTime:  i.ExpiredTime,
+		ChargeType:   i.ChargeType,
+		LeaseStart:   i.LeaseStartTime,
 	}
 }
 

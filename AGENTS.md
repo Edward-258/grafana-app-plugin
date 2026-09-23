@@ -13,11 +13,11 @@ Grafana App 插件 `local-ecs-app`：阿里云 ECS 资产（ID/规格/地域）�
 
 ## RBAC 权限矩阵（plugin.json roles[] + 后端 requireAction）
 
-| action                     | grants              | 能做什么                                |
-| -------------------------- | ------------------- | --------------------------------------- |
-| `local-ecs-app.ecs:read`   | Viewer/Editor/Admin | 资产对齐端点（enrich/resolve）、脱敏 AK |
-| `local-ecs-app.ecs:reveal` | Editor/Admin        | 完整 AK（小眼睛）、连通测试             |
-| `local-ecs-app.ecs:write`  | 仅 Admin            | 改写 AK ID/Secret、配置页保存           |
+| action                     | grants              | 能做什么                                                        |
+| -------------------------- | ------------------- | --------------------------------------------------------------- |
+| `local-ecs-app.ecs:read`   | Viewer/Editor/Admin | 资产对齐端点（enrich/resolve）、脱敏 AK                         |
+| `local-ecs-app.ecs:reveal` | Editor/Admin        | 完整 AK（小眼睛）、连通测试、**账户概览（余额/代金券/月账单）** |
+| `local-ecs-app.ecs:write`  | 仅 Admin            | 改写 AK ID/Secret、配置页保存                                   |
 
 **常量单源生成（SSOT）**：`src/plugin.json` 是唯一源头，`npm run build` 前置运行 `scripts/gen-permissions.js` 生成 `pkg/app/handler/zz_generated.go`（PluginID、三个 action 常量、roleActions 回退映射）和 `src/permissions.gen.ts`。**任何地方不得手写权限字符串**；新增 action 必须先在生成器 `SEMANTIC` 和守护测试 `zz_generated_test.go` 同时登记（故意制造摩擦）。改 plugin.json 后忘重新生成会被 `go test` 抓住（守护测试独立重推导比对 + 硬编码语义锚点）。插件 ID 的源头是 `package.json` 的 `name`（webpack 与生成器同源；Go 侧引用 `handler.PluginID`）。
 

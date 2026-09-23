@@ -68,7 +68,7 @@ func (r rawInstance) toInstance() model.Instance {
 }
 
 type apiEnvelope struct {
-	Code string `json:"Code"`
+	Code    string `json:"Code"`
 	Message string `json:"Message"`
 	// BSS 系（如 QueryAvailableInstances）的成功响应同样携带 Code/Message
 	//（"Success"/"Successful!"），必须以显式 Success 标志区分成败；
@@ -88,6 +88,44 @@ type availableInstancesResponse struct {
 			InstanceID  string `json:"InstanceID"`
 			CreateTime  string `json:"CreateTime"`
 		} `json:"InstanceList"`
+	} `json:"Data"`
+}
+
+// accountBalanceResponse 是 BSS QueryAccountBalance（账户余额）的响应。
+// 按量付费资源没有实例级额度，消耗的就是账户可用余额（现金+信用）。
+type accountBalanceResponse struct {
+	Success bool `json:"Success"`
+	Data    struct {
+		AvailableAmount     string `json:"AvailableAmount"`
+		AvailableCashAmount string `json:"AvailableCashAmount"`
+		CreditAmount        string `json:"CreditAmount"`
+		Currency            string `json:"Currency"`
+	} `json:"Data"`
+}
+
+// cashCouponsResponse 是 BSS QueryCashCoupons（代金券）的响应，取有效券余额合计。
+type cashCouponsResponse struct {
+	Success bool `json:"Success"`
+	Data    struct {
+		CashCoupon []struct {
+			Balance string `json:"Balance"`
+		} `json:"CashCoupon"`
+	} `json:"Data"`
+}
+
+// instanceBillResponse 是 BSS QueryInstanceBill（实例账单）的响应。
+// 注意 PretaxAmount 是裸数字（与 QueryAccountBalance 的字符串金额不同型）。
+type instanceBillResponse struct {
+	Success bool `json:"Success"`
+	Data    struct {
+		TotalCount int `json:"TotalCount"`
+		Items      struct {
+			Item []struct {
+				PipCode      string `json:"PipCode"`
+				ProductName  string `json:"ProductName"`
+				PretaxAmount any    `json:"PretaxAmount"`
+			} `json:"Item"`
+		} `json:"Items"`
 	} `json:"Data"`
 }
 

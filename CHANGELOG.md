@@ -8,6 +8,7 @@ Initial release.
 
 - ECS 资产对齐：从 Prometheus 采集监控标识，后端用阿里云 AK 全地域枚举并唯一命中，前端展示 ECS ID/规格/地域/租期（公网/内网 IP 永不出后端）。
 - 租期信息：展示 CreationTime / ExpiredTime / 计费方式，按量付费实例屏蔽 2099 哨兵到期值。
+- 账户概览（参照 cloudscope）：BSS 余额/现金/信用/代金券 + 当月账单按产品聚合（QueryInstanceBill 实付口径），随 SWR 快照缓存经 enrich/resolve 下发；资产页顶部概览栏 + 弹窗/详情 PostPaid 余额显示；**仅 ecs:reveal（Editor/Admin）可见，Viewer 响应不含**（真实 Viewer 用户实证）；金额兼容字符串/数字两种形态并剥离千分位逗号。
 - 精确创建时间（BSS 补充链路）：`QueryAvailableInstances` 订单口径时间以独立字段 `leaseStart` 展示（列表"租赁开始"列 + 弹窗行，秒级精度）；ECS `creationTime`（分钟精度）保持原值不动，两者并列展示。复用 SWR 缓存与强制刷新，BSS 不可用时软降级置空。
 - 资产列表刷新按钮：一键强制实时查询（`refresh:true` 绕过 SWR 缓存直达阿里云全地域枚举，结果回写缓存），进页面/切 tab 仍走缓存。
 - RBAC：`ecs:read` / `ecs:reveal` / `ecs:write` 三级 action，plugin.json 单源生成前后端常量；凭证仅存 `secureJsonData`。
