@@ -29,7 +29,7 @@ type Datasource struct {
 }
 
 func New(_ context.Context, _ backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
-	return &Datasource{resolver: service.NewResolver()}, nil
+	return &Datasource{resolver: service.NewResolverForAlerting()}, nil
 }
 
 func (d *Datasource) Dispose() {}
@@ -108,7 +108,7 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 			continue
 		}
 		if kind == frameAccount {
-			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{accountFrame(billing, timeNow())}}
+			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{accountFrame(billing, postPaidBill(instances, billing.BillByInstance), timeNow())}}
 		} else {
 			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{assetsFrame(instances, timeNow())}}
 		}

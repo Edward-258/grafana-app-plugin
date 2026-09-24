@@ -192,6 +192,47 @@ func (c *Client) MonthlyBill(ctx context.Context, cycle string) ([]model.BillIte
 	return out, nil
 }
 
+// InstanceBills 按 cycle（YYYY-MM）返回实例级当月实付账单（同一 QueryInstanceBill
+// 链路，聚合前的原始粒度）：实例ID -> 金额合计。供告警数据源把账单过滤到
+// 指定计费方式的实例（如按量付费）。分页与 MonthlyBill 同参数同上限。
+// 契约校验：响应有账单行却一个 InstanceID 都没有，说明上游结构变了——报错
+// 走软降级（billTotal 置 null），绝不把空 map 当"按量实付为 0"喂给告警。
+func (c *Client) InstanceBills(ctx context.Context, cycle string) (map[string]float64, error) {
+	out := map[string]float64{}
+	seen, withID := 0, 0
+	for page := 1; page <= 20; page++ {
+		body, err := c.call(ctx, bssEndpoint, map[string]string{
+			"Action":       "QueryInstanceBill",
+			"Version":      "2017-12-14",
+			"BillingCycle": cycle,
+			"PageNum":      strconv.Itoa(page),
+			"PageSize":     "300",
+		})
+		if err != nil {
+			return nil, err
+		}
+		var parsed instanceBillResponse
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, fmt.Errorf("解析 BSS 账单响应失败: %w", err)
+		}
+		for _, it := range parsed.Data.Items.Item {
+			if it.InstanceID == "" {
+				continue // 无实例归属的杂项（账户级费用）不参与按实例过滤
+			}
+			withID++
+			out[it.InstanceID] += model.ParseMoneyAny(it.PretaxAmount)
+		}
+		seen += len(parsed.Data.Items.Item)
+		if seen >= parsed.Data.TotalCount || len(parsed.Data.Items.Item) == 0 {
+			break
+		}
+	}
+	if seen > 0 && withID == 0 {
+		return nil, fmt.Errorf("BSS 账单响应 %d 行均无 InstanceID，实例级过滤不可用", seen)
+	}
+	return out, nil
+}
+
 // maxResponseBytes 单个阿里云响应的读取上限。分页 PageSize=100 时单页响应
 // 只有几百 KB，4MB 是异常检测线：超过即说明上游行为异常（或未来有人调大
 // 分页），拒绝处理而不是把未知体积读进内存。

@@ -66,7 +66,7 @@ func TestFramesOmitIPs(t *testing.T) {
 	frames := map[string][]byte{}
 	for name, f := range map[string]interface{ MarshalJSON() ([]byte, error) }{
 		"assets":  assetsFrame(list, now),
-		"account": accountFrame(model.AccountOverview{Available: 7.36, Currency: "CNY"}, now),
+		"account": accountFrame(model.AccountOverview{Available: 7.36, Currency: "CNY"}, ptr(7.36), now),
 	} {
 		b, err := json.Marshal(f)
 		if err != nil {
@@ -83,6 +83,9 @@ func TestFramesOmitIPs(t *testing.T) {
 	if !strings.Contains(string(frames["assets"]), "i-abc") {
 		t.Fatalf("assets 帧缺资产字段: %s", frames["assets"])
 	}
+	if strings.Contains(string(frames["assets"]), "i-post") {
+		t.Fatalf("assets 帧不应包含按量付费实例（到期告警只服务包年包月）: %s", frames["assets"])
+	}
 }
 
 func TestAssetsFrameDaysToExpire(t *testing.T) {
@@ -98,23 +101,17 @@ func TestAssetsFrameDaysToExpire(t *testing.T) {
 	if f.Fields[0].Name != "time" {
 		t.Fatalf("首列应为 time，得到 %s", f.Fields[0].Name)
 	}
-	// 每实例一个 daysToExpire 字段，顺序与列表一致（time 后依次排列）
-	if len(f.Fields) != 3 {
-		t.Fatalf("应有 time + 2 个实例序列，得到 %d 个字段", len(f.Fields))
+	// 按量付费被过滤：只剩包年包月实例一个 daysToExpire 字段
+	if len(f.Fields) != 2 {
+		t.Fatalf("应有 time + 1 个包年包月序列，得到 %d 个字段", len(f.Fields))
 	}
-	pre, post := f.Fields[1], f.Fields[2]
+	pre := f.Fields[1]
 	if pre.Name != "daysToExpire" || pre.Labels["instanceId"] != "i-pre" {
 		t.Fatalf("pre 序列异常: %s %v", pre.Name, pre.Labels)
-	}
-	if post.Labels["instanceId"] != "i-post" {
-		t.Fatalf("post 序列异常: %v", post.Labels)
 	}
 	// 2026-09-24 → 2026-10-04 恰好 10 天
 	if got := *pre.At(0).(*float64); got != 10 {
 		t.Fatalf("daysToExpire = %v, 期望 10", got)
-	}
-	if !f.NilAt(2, 0) {
-		t.Fatal("PostPaid 的 daysToExpire 应为 null")
 	}
 	if pre.Labels["chargeType"] != "PrePaid" || pre.Labels["name"] != "pre" {
 		t.Fatalf("标签缺失: %v", pre.Labels)
@@ -123,8 +120,12 @@ func TestAssetsFrameDaysToExpire(t *testing.T) {
 
 func TestAccountFrameSchemaStable(t *testing.T) {
 	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
-	empty := accountFrame(model.AccountOverview{}, now)
-	full := accountFrame(model.AccountOverview{Available: 7.36, Coupon: 1, BillTotal: 108.14, Currency: "CNY", BillingCycle: "2026-09"}, now)
+	ppb := 107.93
+	empty := accountFrame(model.AccountOverview{}, nil, now)
+	full := accountFrame(
+		model.AccountOverview{Available: 7.36, Coupon: 1, BillTotal: 108.14, Currency: "CNY", BillingCycle: "2026-09"},
+		&ppb, now,
+	)
 	if len(empty.Fields) != len(full.Fields) {
 		t.Fatalf("零值与有值时字段数不一致: %d vs %d", len(empty.Fields), len(full.Fields))
 	}
@@ -151,6 +152,13 @@ func TestAccountFrameSchemaStable(t *testing.T) {
 	if got := *full.Fields[1].At(0).(*float64); got != 7.36 {
 		t.Fatalf("availableAmount = %v", got)
 	}
+	// billTotal 独立于 ov.BillTotal：只统计按量付费实例的当月实付
+	if got := *full.Fields[3].At(0).(*float64); got != 107.93 {
+		t.Fatalf("billTotal = %v, 期望按量付费实付 107.93", got)
+	}
+	if full.Fields[3].Labels["chargeType"] != "PostPaid" {
+		t.Fatalf("billTotal 缺 chargeType 标签: %v", full.Fields[3].Labels)
+	}
 	// metric 标签区分三条序列：Grafana 要求告警实例标签集唯一，缺它会因
 	// labels 撞车整体拒绝
 	for i, want := range []string{"availableAmount", "couponAmount", "billTotal"} {
@@ -166,6 +174,30 @@ func TestAccountFrameSchemaStable(t *testing.T) {
 	}
 	if len(empty.Fields[1].Labels) != 1 {
 		t.Fatal("空概览应只剩 metric 标签（币种/账期为空不产生标签）")
+	}
+	// 实例账单不可用（BSS 软失败）：billTotal 为 null，绝不发 0 冒充
+	partial := accountFrame(model.AccountOverview{Available: 7.36}, nil, now)
+	if !partial.NilAt(3, 0) {
+		t.Fatal("实例账单缺失时 billTotal 应为 null")
+	}
+	if partial.NilAt(1, 0) {
+		t.Fatal("实例账单缺失不影响余额字段")
+	}
+}
+
+func TestPostPaidBill(t *testing.T) {
+	list := []model.Instance{
+		{InstanceID: "i-pre", ChargeType: "PrePaid"},
+		{InstanceID: "i-post1", ChargeType: "PostPaid"},
+		{InstanceID: "i-post2", ChargeType: "PostPaid"},
+		{InstanceID: "i-other", ChargeType: "PostPaid"},
+	}
+	bills := map[string]float64{"i-pre": 5, "i-post1": 107.93, "i-post2": 0.07, "i-unknown": 9}
+	if got := *postPaidBill(list, bills); got != 108 {
+		t.Fatalf("按量付费实付合计 = %v, 期望 108（不含包年包月与快照外实例）", got)
+	}
+	if postPaidBill(list, nil) != nil {
+		t.Fatal("实例账单不可用应返回 nil（billTotal 置 null）")
 	}
 }
 

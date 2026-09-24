@@ -111,14 +111,9 @@ export default function App({ query }: AppProps) {
       {tab === 'assets' && (
         <>
           <Alert title="接入 Grafana 告警" severity="info">
-            在 Alerting 里用数据源「ECS 资产（告警）」创建规则即可对资产/账单设阈值，例如{' '}
-            <code>daysToExpire &lt; 7</code>（到期提醒）
-            {billing && (
-              <>
-                、<code>availableAmount &lt; 100</code>（余额不足）
-              </>
-            )}
-            ；快照缓存 5 分钟，评估间隔建议 ≥ 5m。
+            在 Alerting 里用数据源「ECS 资产（告警）」创建规则即可设阈值：包年包月实例用{' '}
+            <code>daysToExpire &lt; 7</code>（到期提醒）；按量付费实例看余额池， <code>availableAmount &lt; 100</code>
+            （余额不足）或 <code>billTotal &gt; 500</code>（当月按量实付）。 快照缓存 5 分钟，评估间隔建议 ≥ 5m。
             <Button
               size="sm"
               variant="secondary"

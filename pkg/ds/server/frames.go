@@ -12,14 +12,16 @@ import (
 // 帧字段白名单：全部来自 PublicAsset 级已裁剪信息，绝不包含任何 IP/地址字段。
 // 守护测试 frames_test.go 会序列化整帧断言无 IP 泄漏。
 
-// assetsFrame 按告警的「宽序列」形态组织：time 列 + 每台实例一个带标签的
-// daysToExpire 数值字段（SSE 的 reduce/threshold 只吃这种形态，直接建表会报
-// "input data must be a wide series"）。标签（instanceId/名称/规格/地域/计费
-// 方式）会随告警实例带出，可直接用于通知路由；按量付费（无固定到期）的字段
-// 值为 null，配 dropNN 后不产生告警实例。
+// assetsFrame 只服务**包年包月（PrePaid）**实例：每台一个带标签的
+// daysToExpire 数值字段（SSE 要求宽序列：time 列 + 数值列，多行宽表会被判
+// long 拒收）。按量付费没有到期概念，不输出 null 序列制造噪音（用户拍板，
+// 见 spec §10.14）。labels 随告警实例带出，可直接用于通知路由。
 func assetsFrame(list []model.Instance, now time.Time) *data.Frame {
 	fields := []*data.Field{data.NewField("time", nil, []time.Time{now})}
 	for _, inst := range list {
+		if inst.ChargeType != "PrePaid" {
+			continue
+		}
 		labels := data.Labels{
 			"instanceId": inst.InstanceID,
 			"name":       inst.InstanceName,
@@ -42,18 +44,20 @@ func assetsFrame(list []model.Instance, now time.Time) *data.Frame {
 	return data.NewFrame(string(frameAssets), fields...)
 }
 
-// accountFrame 账户概览单行宽序列。currency/billingCycle/metric 只能作为数值
-// 字段的 labels 存在——独立字符串列会把整帧判成 long 形态，SSE 直接拒收
-// （"input data must be a wide series"，见 spec §10.14）。metric 标签区分同帧
-// 的三条序列：Grafana 要求告警实例的标签集唯一，没有它 reduce 结果会因
-// labels 撞车被整体拒绝。labels 随告警实例带出。BSS 整体软失败时 IsZero：
-// 保留同一 schema、值全 null（规则评估落到 NoData 状态，而不是帧结构漂移）。
-func accountFrame(ov model.AccountOverview, now time.Time) *data.Frame {
-	avail, coupon, bill := ptr(ov.Available), ptr(ov.Coupon), ptr(ov.BillTotal)
+// accountFrame 账户概览单行宽序列。availableAmount/couponAmount 是账户级余额
+// 池（按量付费实例的消耗来源，无法按实例拆分）；billTotal 只统计**按量付费
+// 实例**的当月实付（postPaidBill 由调用方从实例快照 × 实例级账单求和，nil 表
+// 示实例账单不可用）。附加信息一律走字段 labels：独立字符串列会把整帧判成
+// long 形态被 SSE 拒收，metric 标签区分三条序列的告警实例身份（见 spec
+// §10.14）。BSS 整体软失败时 IsZero：保留同一 schema、值全 null（规则评估落
+// 到 NoData 状态，而不是帧结构漂移）。
+func accountFrame(ov model.AccountOverview, postPaidBill *float64, now time.Time) *data.Frame {
+	avail, coupon := ptr(ov.Available), ptr(ov.Coupon)
+	bill := postPaidBill
 	if ov.IsZero() {
 		avail, coupon, bill = nil, nil, nil
 	}
-	labels := func(metric string) data.Labels {
+	labels := func(metric string, extra data.Labels) data.Labels {
 		l := data.Labels{"metric": metric}
 		if ov.Currency != "" {
 			l["currency"] = ov.Currency
@@ -61,15 +65,34 @@ func accountFrame(ov model.AccountOverview, now time.Time) *data.Frame {
 		if ov.BillingCycle != "" {
 			l["billingCycle"] = ov.BillingCycle
 		}
+		for k, v := range extra {
+			l[k] = v
+		}
 		return l
 	}
 	return data.NewFrame(
 		string(frameAccount),
 		data.NewField("time", nil, []time.Time{now}),
-		data.NewField("availableAmount", labels("availableAmount"), []*float64{avail}),
-		data.NewField("couponAmount", labels("couponAmount"), []*float64{coupon}),
-		data.NewField("billTotal", labels("billTotal"), []*float64{bill}),
+		data.NewField("availableAmount", labels("availableAmount", nil), []*float64{avail}),
+		data.NewField("couponAmount", labels("couponAmount", nil), []*float64{coupon}),
+		data.NewField("billTotal", labels("billTotal", data.Labels{"chargeType": "PostPaid"}), []*float64{bill}),
 	)
+}
+
+// postPaidBill 汇总按量付费实例的当月实付（实例级账单 × 快照计费方式求和）。
+// 实例账单不可用（BSS 软失败）时返回 nil → billTotal 为 null → 规则评估落
+// NoData，绝不发 0 冒充真实账单。
+func postPaidBill(instances []model.Instance, bills map[string]float64) *float64 {
+	if bills == nil {
+		return nil
+	}
+	total := 0.0
+	for _, inst := range instances {
+		if inst.ChargeType == "PostPaid" {
+			total += bills[inst.InstanceID]
+		}
+	}
+	return &total
 }
 
 func ptr[T any](v T) *T { return &v }

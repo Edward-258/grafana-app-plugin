@@ -4,13 +4,14 @@
 
 ### Features
 
-- Grafana 告警集成：捆绑后端数据源 `local-ecs-app-ds`（app+datasource 组合，`includes` 登记 + provisioning 预置 uid `ecs-ds`），把资产/账单快照暴露为告警规则可查询的数据帧。`assets` 帧为宽序列（time + 每实例一个带标签的 `daysToExpire`，标签 instanceId/name/type/region/chargeType 随告警实例带出）；`account` 帧单行（availableAmount/couponAmount/billTotal）。**规则在 Grafana Alerting UI 由用户自建**（资产页引导卡 + `/alerting/list` 深链），已实证全链路：实建 `daysToExpire < 1000` 规则 → 告警引擎无用户上下文取数评估 → 到期实例 Alerting、长期实例 Normal。
+- Grafana 告警集成：捆绑后端数据源 `local-ecs-app-ds`（app+datasource 组合，`includes` 登记 + provisioning 预置 uid `ecs-ds`），把资产/账单快照暴露为告警规则可查询的数据帧。`assets` 帧为宽序列（time + 每实例一个带标签的 `daysToExpire`，标签 instanceId/name/type/region/chargeType 随告警实例带出），**只含包年包月实例**；`account` 帧单行（availableAmount/couponAmount 账户级 + **billTotal 仅统计按量付费实例**当月实付，带 chargeType=PostPaid 标签，实例级账单不可用时置 null 绝不发 0）。**规则在 Grafana Alerting UI 由用户自建**（资产页引导卡 + `/alerting/list` 深链），已实证全链路：实建规则 → 告警引擎无用户上下文取数评估 → 到期实例 Alerting、长期实例 Normal。
 - 告警数据源凭证自动同步：app 后端启动（含配置保存触发的实例重建）时以 service account（plugin.json `iam` 新增 Grafana 核心 action `datasources:read/write`，`users.permissions:read` 先例）把配置页 AK 经数据源 API 写入 ds 的 `secureJsonData`——Secret 只能写不能读，前端无法搬运已存密文；幂等标记是 AK ID 的 sha256 前缀（存 ds `jsonData`，承诺值不泄漏本体），换 AK 自动重同步。
 - 告警数据源权限分档与插件 UI 一致：`assets` 帧 `ecs:read`（Viewer 可读）、`account` 帧 `ecs:reveal`（Editor/Admin，与 `attachBilling` 同档），先鉴权后读设置（不向未授权调用者泄漏凭证配置状态）；评估态（无用户上下文）放行供告警引擎取数。注意：告警实例的触发值对「能看告警的人」天然可见（财务数字进告警即具广播属性）。
 
 ### Fixed
 
 - account 帧对告警引擎不可用：帧内混入 currency/billingCycle 字符串列导致整帧被判 long 形态、SSE 拒收（`input data must be a wide series`）；改为数值字段上的 labels 后又因三条序列 labels 撞车被拒（`frame cannot uniquely be identified`）——最终形态为 time + 三个带 `metric`/`currency`/`billingCycle` 标签的数值字段。已实建余额规则（availableAmount < 100）实证：三实例按 metric 标签区分、Alerting/Normal 状态符合数值预期、编辑器 Preview 正常。附带修复：查询/门禁断言通过不代表告警引擎接受帧，新增「禁止非数值列」守护测试。
+- 告警帧按计费方式分域（用户拍板）：`assets` 到期帧只输出包年包月实例（按量付费无到期概念，null 序列只是图表噪音）；`account` 帧 `billTotal` 只统计按量付费实例当月实付（新增 `client.InstanceBills` 解析 QueryInstanceBill 的实例级明细，与快照计费方式求和；BSS 响应无 InstanceID 或实例账单失败时 billTotal 置 null 走 NoData，绝不发 0 冒充）。实测发现：按量付费实付可能被省钱计划抵扣为 0，属正常数据。
 
 ## 1.0.0 (Unreleased)
 

@@ -18,6 +18,10 @@ type AccountOverview struct {
 	BillingCycle string     `json:"billingCycle,omitempty"`
 	BillTotal    float64    `json:"billTotal,omitempty"`
 	BillItems    []BillItem `json:"billItems,omitempty"`
+	// BillByInstance 实例级当月实付（实例ID->金额），仅供告警数据源做计费
+	// 方式过滤（如只保留按量付费实例）。聚合口径之外的补充数据：不进任何
+	// JSON 响应（app UI 的账单仍用 BillItems），仅在告警解析器开启时填充。
+	BillByInstance map[string]float64 `json:"-"`
 }
 
 // BillItem 是按产品聚合的月账单项。

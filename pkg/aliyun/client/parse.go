@@ -115,12 +115,14 @@ type cashCouponsResponse struct {
 
 // instanceBillResponse 是 BSS QueryInstanceBill（实例账单）的响应。
 // 注意 PretaxAmount 是裸数字（与 QueryAccountBalance 的字符串金额不同型）。
+// Item 粒度为实例级，InstanceID 可与 ECS 快照的计费方式做关联过滤。
 type instanceBillResponse struct {
 	Success bool `json:"Success"`
 	Data    struct {
 		TotalCount int `json:"TotalCount"`
 		Items      struct {
 			Item []struct {
+				InstanceID   string `json:"InstanceID"`
 				PipCode      string `json:"PipCode"`
 				ProductName  string `json:"ProductName"`
 				PretaxAmount any    `json:"PretaxAmount"`

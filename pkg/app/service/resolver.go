@@ -39,6 +39,9 @@ const (
 type Resolver struct {
 	mu    sync.Mutex
 	cache *ecsCache
+	// wantInstanceBills：告警数据源需要实例级账单（按计费方式过滤），app 侧
+	// 解析器不需要（多一次 BSS 分页调用，不为此付费）。见 NewResolverForAlerting。
+	wantInstanceBills bool
 	// fetch 抽象"全量拉取"动作以便测试注入；生产实现是阿里云全地域扫描。
 	fetch func(ctx context.Context, cfg Config) ([]model.Instance, error)
 	// fetchBss 是 BSS「已购资源」补充链路（订单口径租赁开始时间）。
@@ -59,32 +62,55 @@ type ecsCache struct {
 }
 
 func NewResolver() *Resolver {
-	return &Resolver{
-		fetch: func(ctx context.Context, cfg Config) ([]model.Instance, error) {
-			return client.New(cfg).ListAll(ctx)
-		},
-		fetchBss: func(ctx context.Context, cfg Config) (map[string]string, error) {
-			return client.New(cfg).CreationTimes(ctx)
-		},
-		fetchBilling: func(ctx context.Context, cfg Config) (model.AccountOverview, error) {
-			c := client.New(cfg)
-			ov, err := c.AccountBalance(ctx)
-			if err != nil {
-				return model.AccountOverview{}, err
-			}
-			cycle := time.Now().Format("2006-01")
-			items, err := c.MonthlyBill(ctx, cycle)
-			if err != nil {
-				return ov, fmt.Errorf("余额已取、账单失败: %w", err)
-			}
-			ov.BillingCycle = cycle
-			for _, it := range items {
-				ov.BillTotal += it.Amount
-			}
-			ov.BillItems = items
-			return ov, nil
-		},
+	return newResolver(false)
+}
+
+// NewResolverForAlerting 供告警数据源使用：在资产/账户之外额外拉取实例级
+// 账单（多一次 BSS 分页调用），使 account 帧的 billTotal 能过滤到指定计费
+// 方式的实例（如只统计按量付费）。
+func NewResolverForAlerting() *Resolver {
+	return newResolver(true)
+}
+
+func newResolver(wantInstanceBills bool) *Resolver {
+	r := &Resolver{wantInstanceBills: wantInstanceBills}
+	r.fetch = func(ctx context.Context, cfg Config) ([]model.Instance, error) {
+		return client.New(cfg).ListAll(ctx)
 	}
+	r.fetchBss = func(ctx context.Context, cfg Config) (map[string]string, error) {
+		return client.New(cfg).CreationTimes(ctx)
+	}
+	r.fetchBilling = r.fetchBillingImpl
+	return r
+}
+
+// fetchBillingImpl 账户概览链路：余额 + 按产品聚合的当月账单（app UI 口径）；
+// 告警解析器再补充实例级账单（软失败：缺它只影响 ds 的 billTotal，评估落
+// NoData，不打断余额/账单主数据）。
+func (r *Resolver) fetchBillingImpl(ctx context.Context, cfg Config) (model.AccountOverview, error) {
+	c := client.New(cfg)
+	ov, err := c.AccountBalance(ctx)
+	if err != nil {
+		return model.AccountOverview{}, err
+	}
+	cycle := time.Now().Format("2006-01")
+	items, err := c.MonthlyBill(ctx, cycle)
+	if err != nil {
+		return ov, fmt.Errorf("余额已取、账单失败: %w", err)
+	}
+	ov.BillingCycle = cycle
+	for _, it := range items {
+		ov.BillTotal += it.Amount
+	}
+	ov.BillItems = items
+	if r.wantInstanceBills {
+		byInstance, err := c.InstanceBills(ctx, cycle)
+		if err != nil {
+			return ov, fmt.Errorf("余额/账单已取、实例级账单失败: %w", err)
+		}
+		ov.BillByInstance = byInstance
+	}
+	return ov, nil
 }
 
 // Resolve maps one Prometheus identity to the ECS the AK can see——Enrich 的
