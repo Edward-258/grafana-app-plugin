@@ -65,11 +65,28 @@ func TestDecodeBody(t *testing.T) {
 	}
 }
 
+func TestValidateAKPairCount(t *testing.T) {
+	if err := ValidateAKPairCount(0); err != nil {
+		t.Errorf("0 对不应报错, got %v", err)
+	}
+	if err := ValidateAKPairCount(maxAKPairs); err != nil {
+		t.Errorf("恰好上限不应报错, got %v", err)
+	}
+	if err := ValidateAKPairCount(maxAKPairs + 1); !errors.Is(err, ErrTooManyAKPairs) {
+		t.Errorf("超上限应 ErrTooManyAKPairs, got %v", err)
+	}
+}
+
 func TestFailMapsCallerErrorsTo400(t *testing.T) {
 	w := httptest.NewRecorder()
 	fail(w, ErrTooManyIdentities, nil)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("ErrTooManyIdentities 应 400, got %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	fail(w, ErrTooManyAKPairs, nil)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ErrTooManyAKPairs 应 400, got %d", w.Code)
 	}
 	w = httptest.NewRecorder()
 	fail(w, service.ErrNoSettings, nil)

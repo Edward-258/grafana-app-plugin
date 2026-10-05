@@ -43,14 +43,14 @@ func NewApp(ctx context.Context, settings backend.AppInstanceSettings) (instance
 func (a *App) Dispose() {}
 
 func (a *App) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
-	cfg, err := configFrom(req.PluginContext)
-	if err != nil { // AK 未配置时 configFrom 已返回 ErrNoSettings
+	creds, err := credentialsFrom(req.PluginContext)
+	if err != nil { // AK 未配置时 credentialsFrom 已返回 ErrNoSettings
 		return &backend.CheckHealthResult{
 			Status:  backend.HealthStatusUnknown,
 			Message: "未配置 AccessKey",
 		}, nil
 	}
-	if err := a.resolver.Ensure(ctx, cfg); err != nil {
+	if err := a.resolver.Ensure(ctx, creds); err != nil { // 错误信息点名具体哪个 AK
 		return &backend.CheckHealthResult{Status: backend.HealthStatusError, Message: err.Error()}, nil
 	}
 	return &backend.CheckHealthResult{Status: backend.HealthStatusOk, Message: "ok"}, nil

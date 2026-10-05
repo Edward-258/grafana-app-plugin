@@ -5,13 +5,13 @@ import { PluginPage, getBackendSrv, locationService } from '@grafana/runtime';
 import { Alert, Button, FilterInput, LoadingPlaceholder, useStyles2 } from '@grafana/ui';
 import pluginJson from './plugin.json';
 import ConfigPage from './ConfigPage';
-import { Billing, EcsAsset, EcsFields, fmtMoney, fmtTime } from './EcsInfo';
+import { BillingInfo, EcsAsset, EcsFields, fmtMoney, fmtTime, pickBilling } from './EcsInfo';
 import { identitiesFromPrometheus, loadSettings } from './prom';
 
 type ListResponse = {
   instances?: EcsAsset[];
-  // 账户概览（BSS：余额/代金券/当月账单聚合）；仅 ecs:reveal 会话下发，整体软失败时缺省
-  billing?: Billing;
+  // 各 AK 的账户概览（BSS：余额/代金券/当月账单聚合）；仅 ecs:reveal 会话下发，整体软失败的 AK 缺省
+  billings?: BillingInfo[];
   error?: string;
 };
 
@@ -31,7 +31,7 @@ export default function App({ query }: AppProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [instances, setInstances] = useState<EcsAsset[]>([]);
-  const [billing, setBilling] = useState<Billing | null>(null);
+  const [billings, setBillings] = useState<BillingInfo[]>([]);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<EcsAsset | null>(null);
   // 手动刷新计数器：+1 让下面的 effect 重跑一次查询链路；forceRef 标记"本次
@@ -63,7 +63,7 @@ export default function App({ query }: AppProps) {
           refresh: force,
         });
         setInstances(res.instances || []);
-        setBilling(res.billing ?? null);
+        setBillings(res.billings ?? []);
       } catch (e) {
         setError(e instanceof Error ? e.message : '加载失败');
       } finally {
@@ -95,6 +95,9 @@ export default function App({ query }: AppProps) {
     );
   }, [instances, filter]);
 
+  // 多 AK 才显示来源列/分账号概览，单账号保持原版式
+  const multiAK = new Set(instances.map((i) => i.ak).filter(Boolean)).size > 1;
+
   return (
     <PluginPage
       pageNav={{
@@ -124,30 +127,35 @@ export default function App({ query }: AppProps) {
               创建告警规则
             </Button>
           </Alert>
-          {billing && (
-            <div className={styles.overview}>
-              <span>
-                账户余额 <b>{fmtMoney(billing.available, billing.currency)}</b>
-              </span>
-              {billing.coupon ? (
-                <span>
-                  代金券 <b>{fmtMoney(billing.coupon, billing.currency)}</b>
-                </span>
-              ) : null}
-              {billing.billTotal ? (
-                <span>
-                  {billing.billingCycle} 消费（实付） <b>{fmtMoney(billing.billTotal, billing.currency)}</b>
-                </span>
-              ) : null}
-              {billing.billItems && billing.billItems.length > 0 && (
-                <span className={styles.overviewItems}>
-                  {billing.billItems
-                    .slice(0, 4)
-                    .map((it) => `${it.product} ${fmtMoney(it.amount, billing.currency)}`)
-                    .join(' · ')}
-                  {billing.billItems.length > 4 ? ` 等 ${billing.billItems.length} 项` : ''}
-                </span>
-              )}
+          {billings.length > 0 && (
+            <div className={multiAK ? styles.overviewWrap : undefined}>
+              {billings.map((b) => (
+                <div key={b.ak} className={styles.overview}>
+                  {multiAK && <span className={styles.akTitle}>{b.akLabel || b.ak}</span>}
+                  <span>
+                    账户余额 <b>{fmtMoney(b.available, b.currency)}</b>
+                  </span>
+                  {b.coupon ? (
+                    <span>
+                      代金券 <b>{fmtMoney(b.coupon, b.currency)}</b>
+                    </span>
+                  ) : null}
+                  {b.billTotal ? (
+                    <span>
+                      {b.billingCycle} 消费（实付） <b>{fmtMoney(b.billTotal, b.currency)}</b>
+                    </span>
+                  ) : null}
+                  {b.billItems && b.billItems.length > 0 && (
+                    <span className={styles.overviewItems}>
+                      {b.billItems
+                        .slice(0, 4)
+                        .map((it) => `${it.product} ${fmtMoney(it.amount, b.currency)}`)
+                        .join(' · ')}
+                      {b.billItems.length > 4 ? ` 等 ${b.billItems.length} 项` : ''}
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           <div className={styles.toolbar}>
@@ -190,6 +198,7 @@ export default function App({ query }: AppProps) {
                   <th>名称</th>
                   <th>规格</th>
                   <th>地域</th>
+                  {multiAK && <th>AK 账号</th>}
                   <th>创建时间</th>
                   <th>租赁开始</th>
                   <th>到期时间</th>
@@ -198,36 +207,40 @@ export default function App({ query }: AppProps) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, idx) => (
-                  <tr key={row.instanceId || row.monitorName || String(idx)} onClick={() => setSelected(row)}>
-                    <td>{row.monitorName || '—'}</td>
-                    <td>
-                      {row.matched === false || !row.instanceId ? '未匹配' : row.instanceId}
-                      {row.matched === false && row.note && <div className={styles.note}>{row.note}</div>}
-                    </td>
-                    <td>{row.instanceName || row.hostName || '—'}</td>
-                    <td>{row.instanceType || '—'}</td>
-                    <td>{row.regionId || '—'}</td>
-                    <td>{fmtTime(row.creationTime)}</td>
-                    <td>{row.leaseStart ? fmtTime(row.leaseStart) : <span className={styles.note}>—</span>}</td>
-                    <td>
-                      {row.chargeType === 'PostPaid'
-                        ? billing && billing.available > 0
-                          ? `按量付费（余额 ${fmtMoney(billing.available, billing.currency)}）`
-                          : '按量付费'
-                        : fmtTime(row.expiredTime)}
-                    </td>
-                    <td>{row.cpu || '—'}</td>
-                    <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
-                  </tr>
-                ))}
+                {rows.map((row, idx) => {
+                  const rowBilling = pickBilling(row, billings);
+                  return (
+                    <tr key={row.instanceId || row.monitorName || String(idx)} onClick={() => setSelected(row)}>
+                      <td>{row.monitorName || '—'}</td>
+                      <td>
+                        {row.matched === false || !row.instanceId ? '未匹配' : row.instanceId}
+                        {row.matched === false && row.note && <div className={styles.note}>{row.note}</div>}
+                      </td>
+                      <td>{row.instanceName || row.hostName || '—'}</td>
+                      <td>{row.instanceType || '—'}</td>
+                      <td>{row.regionId || '—'}</td>
+                      {multiAK && <td>{row.akLabel || row.ak || '—'}</td>}
+                      <td>{fmtTime(row.creationTime)}</td>
+                      <td>{row.leaseStart ? fmtTime(row.leaseStart) : <span className={styles.note}>—</span>}</td>
+                      <td>
+                        {row.chargeType === 'PostPaid'
+                          ? rowBilling && rowBilling.available > 0
+                            ? `按量付费（余额 ${fmtMoney(rowBilling.available, rowBilling.currency)}）`
+                            : '按量付费'
+                          : fmtTime(row.expiredTime)}
+                      </td>
+                      <td>{row.cpu || '—'}</td>
+                      <td>{row.memoryGiB ? `${row.memoryGiB} GiB` : '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
 
           {selected?.instanceId && (
             <div className={styles.detail}>
-              <EcsFields instance={selected} billing={billing} />
+              <EcsFields instance={selected} billing={pickBilling(selected, billings)} />
             </div>
           )}
         </>
@@ -237,6 +250,17 @@ export default function App({ query }: AppProps) {
 }
 
 const getStyles = (theme: GrafanaTheme2) => ({
+  overviewWrap: css({
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: theme.spacing(2),
+    marginBottom: theme.spacing(2),
+  }),
+  akTitle: css({
+    basis: '100%',
+    fontWeight: 500,
+    color: theme.colors.text.primary,
+  }),
   overview: css({
     display: 'flex',
     flexWrap: 'wrap',

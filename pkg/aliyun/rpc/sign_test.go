@@ -25,7 +25,7 @@ func TestEncodeAliyunRules(t *testing.T) {
 // Action=QueryAvailableInstances&EndTime=2026-09-30%2023%3A59%3A59&Version=2017-12-14
 // （注意空格 %20）经 stringToSign=POST&%2F&<二次编码>（%20 变 %2520）后的
 // HMAC-SHA1。签名只管规范化层，请求体 form.Encode 产 + 属表单传输惯例，
-// 网关解码后才参与比对——两层各归各，见 spec §13①。
+// 网关解码后才参与比对——两层各归各，见 AGENTS.md 台账 13①。
 func TestSignGolden(t *testing.T) {
 	got := Sign("POST", map[string]string{
 		"Action":  "QueryAvailableInstances",

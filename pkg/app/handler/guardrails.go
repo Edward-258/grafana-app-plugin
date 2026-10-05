@@ -20,9 +20,25 @@ const (
 	// DefaultMaxIdentities 单次 enrich 的标识条数上限，是 CPU 放大的直接开关：
 	// 每条标识最多触发 3 串 × 4 步的资产列表线性扫描，条数失控 = 数亿次比较。
 	DefaultMaxIdentities = 2000
+
+	// maxAKPairs 凭证插槽上限。AK/SK 是低频配置数据，50 远超真实需求；兜底
+	// 防止 jsonData/secureJsonData 无界膨胀（设置保存不经插件 handler，写入侧
+	// 只能靠 UI 约束，这里守读取侧）。
+	maxAKPairs = 50
 )
 
-var ErrTooManyIdentities = errors.New("prometheus 标识数量超过上限")
+var (
+	ErrTooManyIdentities = errors.New("prometheus 标识数量超过上限")
+	ErrTooManyAKPairs    = errors.New("AK/SK 对数量超过上限")
+)
+
+// ValidateAKPairCount 挡凭证对数量放大：每对都意味着一轮全地域枚举 + BSS 调用。
+func ValidateAKPairCount(n int) error {
+	if n > maxAKPairs {
+		return fmt.Errorf("%w: %d 对 > %d 对", ErrTooManyAKPairs, n, maxAKPairs)
+	}
+	return nil
+}
 
 // decodeBody 统一请求体闸：先套字节上限再解码，超限 413、坏格式 400。
 // 返回 false 时响应已写完，调用方直接 return。

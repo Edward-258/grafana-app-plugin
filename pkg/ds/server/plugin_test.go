@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,13 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/data"
 
 	"local-ecs-app/pkg/aliyun/model"
+	"local-ecs-app/pkg/app/handler"
+	"local-ecs-app/pkg/app/service"
 )
+
+func testCred(id string) service.Credential {
+	return service.Credential{ID: id, Label: "标签-" + id, AccessKeyID: "ak-" + id, AccessKeySecret: "sk"}
+}
 
 func TestAuthorize(t *testing.T) {
 	cases := []struct {
@@ -62,11 +69,12 @@ func TestFramesOmitIPs(t *testing.T) {
 			PrivateIPs: []string{"172.16.0.9"}, ChargeType: "PostPaid",
 		},
 	}
+	snaps := []service.Snapshot{{Cred: testCred("s1"), Instances: list}}
 	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
 	frames := map[string][]byte{}
 	for name, f := range map[string]interface{ MarshalJSON() ([]byte, error) }{
-		"assets":  assetsFrame(list, now),
-		"account": accountFrame(model.AccountOverview{Available: 7.36, Currency: "CNY"}, ptr(7.36), now),
+		"assets":  assetsFrame(snaps, now),
+		"account": accountFrame([]service.Snapshot{{Cred: testCred("s1"), Billing: model.AccountOverview{Available: 7.36, Currency: "CNY"}}}, now),
 	} {
 		b, err := json.Marshal(f)
 		if err != nil {
@@ -94,7 +102,7 @@ func TestAssetsFrameDaysToExpire(t *testing.T) {
 		{InstanceID: "i-post", InstanceName: "post", ChargeType: "PostPaid"},
 	}
 	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
-	f := assetsFrame(list, now)
+	f := assetsFrame([]service.Snapshot{{Cred: testCred("s1"), Instances: list}}, now)
 	if f.Rows() != 1 {
 		t.Fatalf("宽序列应单行，得到 %d 行", f.Rows())
 	}
@@ -116,16 +124,51 @@ func TestAssetsFrameDaysToExpire(t *testing.T) {
 	if pre.Labels["chargeType"] != "PrePaid" || pre.Labels["name"] != "pre" {
 		t.Fatalf("标签缺失: %v", pre.Labels)
 	}
+	if pre.Labels["ak"] != "s1" || pre.Labels["akLabel"] != "标签-s1" {
+		t.Fatalf("序列应带来源 AK 标签: %v", pre.Labels)
+	}
+}
+
+// 多 AK：assets 帧跨快照合并（同名 daysToExpire 序列靠 labels 区分）；
+// 失败 AK 的快照缺席即无序列（评估落 NoData），不产生空壳字段。
+func TestAssetsFrameMultiAK(t *testing.T) {
+	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	snaps := []service.Snapshot{
+		{Cred: testCred("s1"), Instances: []model.Instance{
+			{InstanceID: "i-a", ExpiredTime: "2026-10-04T00:00:00Z", ChargeType: "PrePaid"},
+		}},
+		{Cred: testCred("s2"), Instances: []model.Instance{
+			{InstanceID: "i-b", ExpiredTime: "2026-11-03T00:00:00Z", ChargeType: "PrePaid"},
+		}},
+	}
+	f := assetsFrame(snaps, now)
+	if len(f.Fields) != 3 { // time + 两台实例
+		t.Fatalf("两 AK 各出一序列，得到 %d 个字段", len(f.Fields))
+	}
+	if f.Fields[1].Labels["ak"] != "s1" || f.Fields[2].Labels["ak"] != "s2" {
+		t.Fatalf("序列 ak 标签不符: %v %v", f.Fields[1].Labels, f.Fields[2].Labels)
+	}
+	if got := *f.Fields[2].At(0).(*float64); got != 40 {
+		t.Fatalf("第二台 daysToExpire = %v, 期望 40", got)
+	}
+	// 失败 AK 缺席：快照列表里没有它就没有它的序列
+	f2 := assetsFrame(snaps[:1], now)
+	if len(f2.Fields) != 2 {
+		t.Fatalf("缺席 AK 不应产生字段: %d", len(f2.Fields))
+	}
 }
 
 func TestAccountFrameSchemaStable(t *testing.T) {
 	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	cred := testCred("s1")
 	ppb := 107.93
-	empty := accountFrame(model.AccountOverview{}, nil, now)
-	full := accountFrame(
-		model.AccountOverview{Available: 7.36, Coupon: 1, BillTotal: 108.14, Currency: "CNY", BillingCycle: "2026-09"},
-		&ppb, now,
-	)
+	zeroSnap := service.Snapshot{Cred: cred, Instances: []model.Instance{{InstanceID: "i-post", ChargeType: "PostPaid"}}}
+	empty := accountFrame([]service.Snapshot{zeroSnap}, now)
+	full := accountFrame([]service.Snapshot{{
+		Cred:      cred,
+		Instances: []model.Instance{{InstanceID: "i-post", ChargeType: "PostPaid"}},
+		Billing:   model.AccountOverview{Available: 7.36, Coupon: 1, BillTotal: 108.14, Currency: "CNY", BillingCycle: "2026-09", BillByInstance: map[string]float64{"i-post": ppb}},
+	}}, now)
 	if len(empty.Fields) != len(full.Fields) {
 		t.Fatalf("零值与有值时字段数不一致: %d vs %d", len(empty.Fields), len(full.Fields))
 	}
@@ -159,11 +202,14 @@ func TestAccountFrameSchemaStable(t *testing.T) {
 	if full.Fields[3].Labels["chargeType"] != "PostPaid" {
 		t.Fatalf("billTotal 缺 chargeType 标签: %v", full.Fields[3].Labels)
 	}
-	// metric 标签区分三条序列：Grafana 要求告警实例标签集唯一，缺它会因
-	// labels 撞车整体拒绝
+	// metric+ak 标签区分序列：Grafana 要求告警实例标签集唯一，缺它会因
+	// labels 撞车整体拒绝；多 AK 时 ak 是唯一性保证
 	for i, want := range []string{"availableAmount", "couponAmount", "billTotal"} {
 		if got := full.Fields[i+1].Labels["metric"]; got != want {
 			t.Fatalf("字段 %d metric 标签 = %q, 期望 %q", i+1, got, want)
+		}
+		if got := full.Fields[i+1].Labels["ak"]; got != "s1" {
+			t.Fatalf("字段 %d ak 标签 = %q, 期望 s1", i+1, got)
 		}
 	}
 	if full.Fields[1].Labels["currency"] != "CNY" || full.Fields[1].Labels["billingCycle"] != "2026-09" {
@@ -172,16 +218,48 @@ func TestAccountFrameSchemaStable(t *testing.T) {
 	if !empty.NilAt(1, 0) {
 		t.Fatal("零值概览应全 null（规则评估落到 NoData）")
 	}
-	if len(empty.Fields[1].Labels) != 1 {
-		t.Fatal("空概览应只剩 metric 标签（币种/账期为空不产生标签）")
-	}
 	// 实例账单不可用（BSS 软失败）：billTotal 为 null，绝不发 0 冒充
-	partial := accountFrame(model.AccountOverview{Available: 7.36}, nil, now)
+	partial := accountFrame([]service.Snapshot{{
+		Cred:    cred,
+		Billing: model.AccountOverview{Available: 7.36},
+	}}, now)
 	if !partial.NilAt(3, 0) {
 		t.Fatal("实例账单缺失时 billTotal 应为 null")
 	}
 	if partial.NilAt(1, 0) {
 		t.Fatal("实例账单缺失不影响余额字段")
+	}
+}
+
+// 多 AK 的 account 帧：每个 AK 一组三字段，标签集靠 ak 唯一（跨 AK 标签撞车
+// 会被告警引擎整体拒绝——AGENTS.md 台账 14④b 的多 AK 版）。
+func TestAccountFrameMultiAK(t *testing.T) {
+	now := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+	snaps := []service.Snapshot{
+		{Cred: testCred("s1"), Billing: model.AccountOverview{Available: 1.1, Currency: "CNY", BillingCycle: "2026-09"}},
+		{Cred: testCred("s2"), Billing: model.AccountOverview{Available: 2.2, Currency: "CNY", BillingCycle: "2026-09"}},
+	}
+	f := accountFrame(snaps, now)
+	if f.Rows() != 1 {
+		t.Fatalf("account 帧应单行宽序列，得到 %d 行", f.Rows())
+	}
+	if len(f.Fields) != 1+3*2 {
+		t.Fatalf("两 AK 应各出三字段: %d", len(f.Fields))
+	}
+	seen := map[string]bool{}
+	for _, field := range f.Fields[1:] {
+		ak := field.Labels["ak"]
+		if ak != "s1" && ak != "s2" {
+			t.Fatalf("ak 标签异常: %v", field.Labels)
+		}
+		key := ak + "/" + field.Labels["metric"]
+		if seen[key] {
+			t.Fatalf("序列标签集撞车: %s", key)
+		}
+		seen[key] = true
+	}
+	if got := *f.Fields[4].At(0).(*float64); got != 2.2 {
+		t.Fatalf("第二个 AK 的 availableAmount = %v, 期望 2.2", got)
 	}
 }
 
@@ -228,5 +306,38 @@ func TestParseTime(t *testing.T) {
 	}
 	if parseTime("2026-09-23 07:59:59") == nil {
 		t.Fatal("BSS 空格格式应可解析")
+	}
+}
+
+// settings 多键读取：akList 插槽 + ak:<slot>:* 键；sync 未跑完的窗口期回退
+// legacy 单键；全空 ErrNoSettings。
+func TestDSSettings(t *testing.T) {
+	pCtx := func(jsonData string, secure map[string]string) backend.PluginContext {
+		return backend.PluginContext{DataSourceInstanceSettings: &backend.DataSourceInstanceSettings{
+			JSONData:                []byte(jsonData),
+			DecryptedSecureJSONData: secure,
+		}}
+	}
+	creds, err := settings(pCtx(
+		`{"akList":[{"slot":"s1","label":"主账号"},{"slot":"s2"}]}`,
+		map[string]string{
+			handler.SecureKeyID("s1"): "LTAI1", handler.SecureKeySecret("s1"): "sk1",
+			handler.SecureKeyID("s2"): "LTAI2", // secret 缺 → 跳过
+		},
+	))
+	if err != nil || len(creds) != 1 || creds[0].ID != "s1" || creds[0].Label != "主账号" || creds[0].AccessKeyID != "LTAI1" {
+		t.Fatalf("多插槽解析不符: %+v err=%v", creds, err)
+	}
+
+	legacy, err := settings(pCtx("", map[string]string{"accessKeyId": "LTAI-old", "accessKeySecret": "sk-old"}))
+	if err != nil || len(legacy) != 1 || legacy[0].ID != service.LegacyCredentialID || legacy[0].AccessKeyID != "LTAI-old" {
+		t.Fatalf("legacy 回退不符: %+v err=%v", legacy, err)
+	}
+
+	if _, err := settings(pCtx("", nil)); !errors.Is(err, service.ErrNoSettings) {
+		t.Fatalf("全空应 ErrNoSettings, got %v", err)
+	}
+	if _, err := settings(backend.PluginContext{}); !errors.Is(err, service.ErrNoSettings) {
+		t.Fatalf("无 ds 设置应 ErrNoSettings, got %v", err)
 	}
 }

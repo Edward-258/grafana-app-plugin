@@ -22,6 +22,8 @@ export type EcsAsset = {
   monitorName?: string;
   matched?: boolean;
   note?: string;
+  ak?: string;
+  akLabel?: string;
 };
 
 // 阿里云 ECS 时间为分钟精度 UTC（yyyy-MM-ddTHH:mmZ，无秒），
@@ -52,6 +54,9 @@ export type Billing = {
   billItems?: Array<{ product: string; amount: number }>;
 };
 
+// 多 AK 形态：每个来源 AK 一份概览，ak 为插槽主键
+export type BillingInfo = Billing & { ak: string; akLabel?: string };
+
 // 金额展示：后端已剥离千分位逗号并归一为数字，这里统一两位小数 + 本地化千分位
 export function fmtMoney(n?: number, currency?: string): string {
   if (n == null) {
@@ -76,9 +81,23 @@ type ResolveResponse = {
   monitorName?: string;
   note?: string;
   instance?: EcsAsset;
-  billing?: Billing;
+  billings?: BillingInfo[];
   error?: string;
 };
+
+// pickBilling 选实例所属 AK 的概览：按 ak 匹配，缺席时单份兜底（单 AK 安装）。
+export function pickBilling(row?: EcsAsset, billings?: BillingInfo[]): Billing | undefined {
+  if (!billings || billings.length === 0) {
+    return undefined;
+  }
+  if (row?.ak) {
+    const hit = billings.find((b) => b.ak === row.ak);
+    if (hit) {
+      return hit;
+    }
+  }
+  return billings.length === 1 ? billings[0] : undefined;
+}
 
 const VAR_NAMES = ['instance', 'node', 'host', 'nodename', 'instanceId', 'instance_id', 'ecs_id'];
 
@@ -129,6 +148,12 @@ export function EcsFields({ instance, billing }: { instance: EcsAsset; billing?:
       <dd>{instance.instanceName || instance.hostName || instance.monitorName || '—'}</dd>
       <dt>计费方式</dt>
       <dd>{chargeLabel(instance.chargeType)}</dd>
+      {instance.ak && (
+        <>
+          <dt>AK 账号</dt>
+          <dd>{instance.akLabel || instance.ak}</dd>
+        </>
+      )}
       <dt>创建时间</dt>
       <dd>{fmtTime(instance.creationTime)}</dd>
       <dt>租赁开始</dt>
@@ -217,7 +242,7 @@ export function EcsModalBody({ onDismiss }: { onDismiss?: () => void }) {
       )}
       {data?.instance && (
         <>
-          <EcsFields instance={data.instance} billing={data.billing} />
+          <EcsFields instance={data.instance} billing={pickBilling(data.instance, data.billings)} />
           <p className={styles.muted}>已与当前 Dashboard 的 Prometheus 实例对齐</p>
         </>
       )}

@@ -4,8 +4,9 @@
 
 ### Features
 
+- 多 AK/SK 支持与并发查找：配置页「阿里云 ECS」区改为**插槽列表**（加号新增一对 AK/SK，≤50 对；删除带确认、换 AK、重输 Secret，保存只发被修改的键）。存储走官方插件设置 API：`jsonData.akList`（slot uuid + 标签，零敏感物料）+ `secureJsonData` 的 `ak:<slot>:id/secret` 键（各自加密）——不直写 grafana.db、不引入 MySQL（取舍记录见 AGENTS.md 台账 15）。Resolver 按插槽分片缓存（每 AK 独立 SWR/单飞/硬上限，同插槽换 AK 立即失效），enrich/告警查询跨 AK 有限并发扇出（≤4）；单 AK 内唯一命中才 matched，跨 AK 歧义 matched=false 并点名冲突账号，单 AK 刷新失败独立降级不拖垮其它 AK（全部失败才整体报错）。告警帧随行新增 `ak`/`akLabel` 标签（assets 每序列、account 每账号一组三字段，标签集靠 ak 保证唯一），account 帧按账号展开；`/ecs/ak`、`/ecs/test` 改为按对下发（响应 `pairs[]`/`results[]`，enrich/resolve 的 `billing` 改为 `billings[]`），CheckHealth 点名失败账号。旧单对凭证自动以 legacy 插槽兼容（app 与 ds 侧均有回退），保存一次即完成插槽迁移，无需手工操作。
 - Grafana 告警集成：捆绑后端数据源 `local-ecs-app-ds`（app+datasource 组合，`includes` 登记 + provisioning 预置 uid `ecs-ds`），把资产/账单快照暴露为告警规则可查询的数据帧。`assets` 帧为宽序列（time + 每实例一个带标签的 `daysToExpire`，标签 instanceId/name/type/region/chargeType 随告警实例带出），**只含包年包月实例**；`account` 帧单行（availableAmount/couponAmount 账户级 + **billTotal 仅统计按量付费实例**当月实付，带 chargeType=PostPaid 标签，实例级账单不可用时置 null 绝不发 0）。**规则在 Grafana Alerting UI 由用户自建**（资产页引导卡 + `/alerting/list` 深链），已实证全链路：实建规则 → 告警引擎无用户上下文取数评估 → 到期实例 Alerting、长期实例 Normal。
-- 告警数据源凭证自动同步：app 后端启动（含配置保存触发的实例重建）时以 service account（plugin.json `iam` 新增 Grafana 核心 action `datasources:read/write`，`users.permissions:read` 先例）把配置页 AK 经数据源 API 写入 ds 的 `secureJsonData`——Secret 只能写不能读，前端无法搬运已存密文；幂等标记是 AK ID 的 sha256 前缀（存 ds `jsonData`，承诺值不泄漏本体），换 AK 自动重同步。
+- 告警数据源凭证自动同步：app 后端启动（含配置保存触发的实例重建）时以 service account（plugin.json `iam` 新增 Grafana 核心 action `datasources:read/write`，`users.permissions:read` 先例）把配置页 AK 经数据源 API 写入 ds 的 `secureJsonData`——Secret 只能写不能读，前端无法搬运已存密文；幂等改为 ds `jsonData.akList` 与 app 插槽表的整体比对（slot uuid 非敏感），增删插槽/换标签/换 AK 自动重同步，删除的插槽空串清键。
 - 告警数据源权限分档与插件 UI 一致：`assets` 帧 `ecs:read`（Viewer 可读）、`account` 帧 `ecs:reveal`（Editor/Admin，与 `attachBilling` 同档），先鉴权后读设置（不向未授权调用者泄漏凭证配置状态）；评估态（无用户上下文）放行供告警引擎取数。注意：告警实例的触发值对「能看告警的人」天然可见（财务数字进告警即具广播属性）。
 
 ### Fixed

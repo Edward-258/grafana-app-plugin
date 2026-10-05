@@ -37,9 +37,7 @@ func (d *Datasource) Dispose() {}
 // queryModel 是前端 QueryEditor / 告警规则的下发查询体。
 type queryModel struct {
 	Frame string `json:"frame"`
-}
-
-// frameKind 约束帧类型；未知值回落 assets（fail-open 到非财务帧，且 assets
+}// frameKind 约束帧类型；未知值回落 assets（fail-open 到非财务帧，且 assets
 // 自身仍有 ecs:read 门禁）。
 type frameKind string
 
@@ -97,51 +95,83 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 			resp.Responses[q.RefID] = backend.DataResponse{Error: err}
 			continue
 		}
-		cfg, err := settings(req.PluginContext)
+		creds, err := settings(req.PluginContext)
 		if err != nil {
 			resp.Responses[q.RefID] = backend.DataResponse{Error: err}
 			continue
 		}
-		instances, billing, err := d.resolver.Snapshot(ctx, cfg, false)
+		snaps, err := d.resolver.Snapshot(ctx, creds, false)
 		if err != nil {
 			resp.Responses[q.RefID] = backend.DataResponse{Error: err}
 			continue
 		}
 		if kind == frameAccount {
-			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{accountFrame(billing, postPaidBill(instances, billing.BillByInstance), timeNow())}}
+			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{accountFrame(snaps, timeNow())}}
 		} else {
-			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{assetsFrame(instances, timeNow())}}
+			resp.Responses[q.RefID] = backend.DataResponse{Frames: data.Frames{assetsFrame(snaps, timeNow())}}
 		}
 	}
 	return resp, nil
 }
 
 func (d *Datasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
-	cfg, err := settings(req.PluginContext)
+	creds, err := settings(req.PluginContext)
 	if err != nil {
 		return &backend.CheckHealthResult{
 			Status:  backend.HealthStatusUnknown,
 			Message: "未配置 AccessKey：请在「ECS 资产」插件配置页保存凭证（会自动同步到本数据源）",
 		}, nil
 	}
-	if err := d.resolver.Ensure(ctx, cfg); err != nil {
+	if err := d.resolver.Ensure(ctx, creds); err != nil { // 错误信息点名具体哪个 AK
 		return &backend.CheckHealthResult{Status: backend.HealthStatusError, Message: err.Error()}, nil
 	}
 	return &backend.CheckHealthResult{Status: backend.HealthStatusOk, Message: "ok"}, nil
 }
 
-// settings 从 ds 实例设置取凭证。凭证只由 app 配置页保存时同步写入
-// secureJsonData（加密存储），本数据源不提供第二录入口。
-func settings(pCtx backend.PluginContext) (service.Config, error) {
-	cfg := service.Config{}
-	if s := pCtx.DataSourceInstanceSettings; s != nil {
-		cfg.AccessKeyID = s.DecryptedSecureJSONData["accessKeyId"]
-		cfg.AccessKeySecret = s.DecryptedSecureJSONData["accessKeySecret"]
+// settings 从 ds 实例设置取全部凭证。键名由 app 配置页保存时经 sync 写入
+// secureJsonData（加密存储），本数据源不提供第二录入口。jsonData.akList 定义
+// 插槽；akList 缺失（sync 未跑完的窗口期）回退 legacy 单键，保证升级期间
+// 已建告警规则不断数。
+func settings(pCtx backend.PluginContext) ([]service.Credential, error) {
+	if pCtx.DataSourceInstanceSettings == nil {
+		return nil, service.ErrNoSettings
 	}
-	if cfg.AccessKeyID == "" || cfg.AccessKeySecret == "" {
-		return cfg, service.ErrNoSettings
+	s := pCtx.DataSourceInstanceSettings
+	var data struct {
+		AKList []handler.AKSlot `json:"akList"`
 	}
-	return cfg, nil
+	if len(s.JSONData) > 0 {
+		_ = json.Unmarshal(s.JSONData, &data)
+	}
+	out := make([]service.Credential, 0, len(data.AKList)+1)
+	for _, slot := range data.AKList {
+		if slot.Slot == "" {
+			continue
+		}
+		c := service.Credential{
+			ID:              slot.Slot,
+			Label:           slot.Label,
+			AccessKeyID:     s.DecryptedSecureJSONData[handler.SecureKeyID(slot.Slot)],
+			AccessKeySecret: s.DecryptedSecureJSONData[handler.SecureKeySecret(slot.Slot)],
+		}
+		if c.AccessKeyID != "" && c.AccessKeySecret != "" {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		id := s.DecryptedSecureJSONData["accessKeyId"]
+		secret := s.DecryptedSecureJSONData["accessKeySecret"]
+		if id != "" && secret != "" {
+			out = append(out, service.Credential{
+				ID: service.LegacyCredentialID, Label: "默认",
+				AccessKeyID: id, AccessKeySecret: secret,
+			})
+		}
+	}
+	if len(out) == 0 {
+		return nil, service.ErrNoSettings
+	}
+	return out, nil
 }
 
 // timeNow 抽出来便于测试注入。

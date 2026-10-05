@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
-
-	"local-ecs-app/pkg/app/service"
 )
 
 func ctxWithUser(role string, settings *backend.AppInstanceSettings) context.Context {
@@ -91,16 +89,23 @@ func TestHandleAK(t *testing.T) {
 		}
 		return m
 	}
-
-	if viewer := get("Viewer"); viewer["full"] != nil || viewer["canReveal"] != nil {
-		t.Errorf("Viewer 不应拿到完整 AccessKey ID: %v", viewer)
-	} else if viewer["masked"] != "LTA…inA" {
-		t.Errorf("Viewer masked = %v, want LTA…inA", viewer["masked"])
+	firstPair := func(m map[string]any) map[string]any {
+		pairs, ok := m["pairs"].([]any)
+		if !ok || len(pairs) != 1 {
+			t.Fatalf("应恰有一对凭证: %v", m)
+		}
+		return pairs[0].(map[string]any)
 	}
-	if editor := get("Editor"); editor["full"] != akID || editor["canReveal"] != true {
+
+	if viewer := get("Viewer"); firstPair(viewer)["full"] != nil || viewer["canReveal"] != nil {
+		t.Errorf("Viewer 不应拿到完整 AccessKey ID: %v", viewer)
+	} else if firstPair(viewer)["masked"] != "LTA…inA" {
+		t.Errorf("Viewer masked = %v, want LTA…inA", firstPair(viewer)["masked"])
+	}
+	if editor := get("Editor"); firstPair(editor)["full"] != akID || editor["canReveal"] != true {
 		t.Errorf("Editor 应拿到完整 AccessKey ID: %v", editor)
 	}
-	if admin := get("Admin"); admin["full"] != akID {
+	if admin := get("Admin"); firstPair(admin)["full"] != akID {
 		t.Errorf("Admin 应拿到完整 AccessKey ID: %v", admin)
 	}
 }
@@ -117,43 +122,18 @@ func TestHandleAKLegacy(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&m); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if m["legacy"] != true {
-		t.Errorf("应标记 legacy: %v", m)
+	pairs, ok := m["pairs"].([]any)
+	if !ok || len(pairs) != 1 {
+		t.Fatalf("应恰有一对凭证: %v", m)
 	}
-	if m["full"] != "LEGACYKEY12345" {
-		t.Errorf("Admin 应拿到 legacy 完整值: %v", m)
+	p := pairs[0].(map[string]any)
+	if p["legacy"] != true {
+		t.Errorf("应标记 legacy: %v", p)
 	}
-	if m["masked"] != "LEG…345" {
-		t.Errorf("masked = %v, want LEG…345", m["masked"])
+	if p["full"] != "LEGACYKEY12345" {
+		t.Errorf("Admin 应拿到 legacy 完整值: %v", p)
 	}
-}
-
-func TestConfigFromDualRead(t *testing.T) {
-	// secureJsonData 副本优先于旧 jsonData
-	pCtx := backend.PluginContext{AppInstanceSettings: &backend.AppInstanceSettings{
-		JSONData:                []byte(`{"accessKeyId":"OLD"}`),
-		DecryptedSecureJSONData: map[string]string{"accessKeyId": "NEW", "accessKeySecret": "sec"},
-	}}
-	cfg, err := configFrom(pCtx)
-	if err != nil || cfg.AccessKeyID != "NEW" || cfg.AccessKeySecret != "sec" {
-		t.Fatalf("secure 优先失败: cfg=%+v err=%v", cfg, err)
-	}
-
-	// 旧 jsonData 兜底（迁移前）
-	pCtx2 := backend.PluginContext{AppInstanceSettings: &backend.AppInstanceSettings{
-		JSONData:                []byte(`{"accessKeyId":"OLD"}`),
-		DecryptedSecureJSONData: map[string]string{"accessKeySecret": "sec"},
-	}}
-	cfg2, err := configFrom(pCtx2)
-	if err != nil || cfg2.AccessKeyID != "OLD" {
-		t.Fatalf("legacy 兜底失败: cfg=%+v err=%v", cfg2, err)
-	}
-
-	// 两者皆缺 → ErrNoSettings
-	pCtx3 := backend.PluginContext{AppInstanceSettings: &backend.AppInstanceSettings{
-		DecryptedSecureJSONData: map[string]string{"accessKeySecret": "sec"},
-	}}
-	if _, err := configFrom(pCtx3); err != service.ErrNoSettings {
-		t.Fatalf("缺 AccessKey ID 应返回 ErrNoSettings, got %v", err)
+	if p["masked"] != "LEG…345" {
+		t.Errorf("masked = %v, want LEG…345", p["masked"])
 	}
 }
