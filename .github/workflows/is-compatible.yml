@@ -1,7 +1,7 @@
 # 前端 API 兼容性检查：依官方模板（templates/github/workflows/is-compatible.yml）。
 # 用 grafana/plugin-actions/is-compatible（levitate）检测插件是否用到新版 Grafana
 # 已弃用/移除的前端 API——11.6 → 12/13 升级前的第一道机器检查
-# （对照 docs/grafana-plugin-official-spec.md §9 迁移检查点）。
+# （对照 AGENTS.md「11.6 → 12 迁移检查点」）。
 
 name: Latest Grafana API compatibility check
 

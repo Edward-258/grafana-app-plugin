@@ -32,8 +32,8 @@ scrape target **不必**填 ECS 内网或公网 IP。对齐优先用主机名（
 
 ## 怎么用
 
-1. 配置页选择 Grafana 里已有的 **Prometheus 数据源**，填只读 AccessKey（需要 `ecs:DescribeRegions`、`ecs:DescribeInstances`，`AliyunECSReadOnlyAccess` 已覆盖）。
-2. 左侧 Apps → **ECS 资产**：列出 Prometheus 里出现过的机器，以及匹配到的 ECS ID / 规格 / 所属地域。
+1. 配置页选择 Grafana 里已有的 **Prometheus 数据源**，填只读 AccessKey（需要 `ecs:DescribeRegions`、`ecs:DescribeInstances`，`AliyunECSReadOnlyAccess` 已覆盖）；支持多对 AK/SK（≤50 对），资产与账单按账号标注来源。
+2. 左侧 Apps → **ECS 资产**：列出 Prometheus 里出现过的机器，以及匹配到的 ECS ID / 规格 / 所属地域；同时给出创建时间 / 到期时间 / 租赁开始 / 计费方式（包年包月 vs 按量付费）。页面顶部是账户概览（余额 · 代金券 · 当月实付 · Top 产品，仅 Editor/Admin 可见），右上刷新按钮可绕过 5 分钟缓存强制实时查询。
 3. 打开现有利用率 Dashboard，面板菜单 → **ECS 资产信息**：用当前变量走 Prometheus 再查阿里云。
 
 ## Grafana 告警（Alerting）
@@ -49,7 +49,7 @@ scrape target **不必**填 ECS 内网或公网 IP。对齐优先用主机名（
 - 两种计费方式天然分工：到期告警守护包年包月；余额/账单告警守护按量付费（其消耗走账户余额池）。按量付费实付可能被省钱计划抵扣为 0，属正常数据。
 - 凭证不用重录：app 后端启动时用 service account 把配置页保存的 AK 自动同步到数据源（两端均加密存储）。
 - 权限：`assets` 帧 `ecs:read`（Viewer 可读）；`account` 帧与插件 UI 同档，仅 Editor/Admin。注意告警实例的触发值对「能看告警的人」天然可见（财务数字进告警即具广播属性）。
-- 通知复用 Grafana 已有 contact point：规则打 labels → 通知策略路由，无需插件侧配置。
+- 通知复用 Grafana 已有 contact point：规则打 labels → 通知策略路由，无需插件侧配置。序列标签含 instanceId / name / type / region / chargeType（多 AK 时另有 ak / akLabel 标注来源账号），可直接用于通知路由。
 
 ## 本地构建
 

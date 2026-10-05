@@ -5,6 +5,7 @@ dist/
 .eslintcache
 .vscode/
 .zcodeignore
+.claude/
 
 # e2e (playwright)
 test-results/

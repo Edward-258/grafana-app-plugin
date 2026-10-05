@@ -1,7 +1,7 @@
 import { expect, test } from './fixtures';
 
 // RBAC 回归：匿名 Viewer 对照实例（:3001，见 docker-compose.viewer.yaml）。
-// 结论依据 docs/grafana-plugin-official-spec.md §8：
+// 结论依据 AGENTS.md「RBAC 权限矩阵」：
 // - ecs:read（/ecs/ak 脱敏读取）对 Viewer 放行，但响应永不带 full 字段；
 // - ecs:reveal（/ecs/test 连通测试）对 Viewer 403；
 // - 告警数据源（local-ecs-app-ds）的 account 帧（余额/账单）对 Viewer 拒绝，
