@@ -28,11 +28,11 @@ Prometheus 继续管占用率，并告诉插件「这张 dashboard 对应哪台�
 
 scrape target **不必**填 ECS 内网或公网 IP。对齐优先用主机名（`nodename` / `instance`）。
 
-对齐是严格的：弱标识（IP / 主机名 / 实例名）必须在全地域实例中**唯一命中**，跨地域撞名一律记为「未匹配」并注明原因；任何一个地域查询失败就整体报错，绝不静默少列资产。
+对齐是严格的：弱标识（IP / 主机名 / 实例名）必须在全地域实例中**唯一命中**，跨地域撞名一律记为「未匹配」并注明原因；任何一个地域查询失败就整体报错，绝不静默少列资产。唯一例外是 RAM **按地域**收束的 AK——被拒地域（`Forbidden.RAM`）就是这把凭证的可见边界，跳过不报错；所有地域都被拒绝才会报错（注意：实例级收束对 `DescribeInstances` 无效，列表 API 不做逐实例过滤，会命中此报错）。
 
 ## 怎么用
 
-1. 配置页选择 Grafana 里已有的 **Prometheus 数据源**，填只读 AccessKey（需要 `ecs:DescribeRegions`、`ecs:DescribeInstances`，`AliyunECSReadOnlyAccess` 已覆盖）；支持多对 AK/SK（≤50 对），资产与账单按账号标注来源。
+1. 配置页选择 Grafana 里已有的 **Prometheus 数据源**，填只读 AccessKey（最小权限：`ecs:DescribeRegions` + `ecs:DescribeInstances`，`AliyunECSReadOnlyAccess` 已覆盖；账户概览/租赁开始/账单告警还需 BSS 四项 `bssopenapi:QueryAccountBalance/QueryCashCoupons/QueryInstanceBill/QueryAvailableInstances`，缺了仅对应功能软降级）；支持多对 AK/SK（≤50 对），资产与账单按账号标注来源。
 2. 左侧 Apps → **ECS 资产**：列出 Prometheus 里出现过的机器，以及匹配到的 ECS ID / 规格 / 所属地域；同时给出创建时间 / 到期时间 / 租赁开始 / 计费方式（包年包月 vs 按量付费）。页面顶部是账户概览（余额 · 代金券 · 当月实付 · Top 产品，仅 Editor/Admin 可见），右上刷新按钮可绕过 5 分钟缓存强制实时查询。
 3. 打开现有利用率 Dashboard，面板菜单 → **ECS 资产信息**：用当前变量走 Prometheus 再查阿里云。
 

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -23,17 +24,23 @@ import (
 type Client struct {
 	cfg  model.Config
 	http *http.Client
+	// 入口可覆写：单测用 httptest 服务器驱动 ListAll 的全地域扇出
+	//（DescribeRegions 入口 + 地域端点模板，%s=region）。
+	regionsHost string
+	ecsHostTmpl string
 }
 
 func New(cfg model.Config) *Client {
 	return &Client{
-		cfg:  cfg,
-		http: &http.Client{Timeout: 20 * time.Second},
+		cfg:         cfg,
+		http:        &http.Client{Timeout: 20 * time.Second},
+		regionsHost: regionsHost,
+		ecsHostTmpl: "https://ecs.%s.aliyuncs.com/",
 	}
 }
 
 func (c *Client) endpoint(region string) string {
-	return "https://ecs." + region + ".aliyuncs.com/"
+	return fmt.Sprintf(c.ecsHostTmpl, region)
 }
 
 // bssEndpoint 是费用中心（BSS）OpenAPI 入口；注意不是 bssopenapi.aliyuncs.com
@@ -280,10 +287,28 @@ func (c *Client) call(ctx context.Context, host string, action map[string]string
 	var env apiEnvelope
 	_ = json.Unmarshal(body, &env)
 	if env.Code != "" && env.Message != "" && (env.Success == nil || !*env.Success) {
-		return nil, fmt.Errorf("阿里云 %s: %s", env.Code, env.Message)
+		return nil, &APIError{Code: env.Code, Message: env.Message}
 	}
 	if res.StatusCode >= 400 {
 		return nil, fmt.Errorf("阿里云 HTTP %d: %s", res.StatusCode, truncate(string(body), 300))
 	}
 	return body, nil
+}
+
+// APIError 是阿里云 RPC 错误信封的类型化形态，供上层按 Code 精确分类
+// （如 ListAll 对 Forbidden.RAM 的授权范围外跳过），不靠字符串匹配。
+type APIError struct {
+	Code    string
+	Message string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("阿里云 %s: %s", e.Code, e.Message)
+}
+
+// IsRamDenied 报告错误是否为 RAM 授权拒绝——该资源不在 AK 的授权范围内
+//（实例收束策略下，未命中授权实例的地域即返回此码，实测于 2026-10-06）。
+func IsRamDenied(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Code == "Forbidden.RAM"
 }
