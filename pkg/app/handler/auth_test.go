@@ -60,7 +60,7 @@ func TestMaskAccessKeyID(t *testing.T) {
 		{"abcdef", "ab…ef"},
 		{"abcdefghi", "ab…hi"},
 		{"abcdefghij", "abc…hij"},
-		{"LTAI5tExampleKeyinA", "LTA…inA"},
+		{"LTAI5tExampleKey001", "LTA…001"},
 	}
 	for _, tc := range cases {
 		if got := maskAccessKeyID(tc.in); got != tc.want {
@@ -70,7 +70,7 @@ func TestMaskAccessKeyID(t *testing.T) {
 }
 
 func TestHandleAK(t *testing.T) {
-	const akID = "LTAI5tExampleKeyinA"
+	const akID = "LTAI5tExampleKey001"
 	settings := &backend.AppInstanceSettings{
 		DecryptedSecureJSONData: map[string]string{"accessKeyId": akID},
 	}
@@ -99,8 +99,8 @@ func TestHandleAK(t *testing.T) {
 
 	if viewer := get("Viewer"); firstPair(viewer)["full"] != nil || viewer["canReveal"] != nil {
 		t.Errorf("Viewer 不应拿到完整 AccessKey ID: %v", viewer)
-	} else if firstPair(viewer)["masked"] != "LTA…inA" {
-		t.Errorf("Viewer masked = %v, want LTA…inA", firstPair(viewer)["masked"])
+	} else if firstPair(viewer)["masked"] != "LTA…001" {
+		t.Errorf("Viewer masked = %v, want LTA…001", firstPair(viewer)["masked"])
 	}
 	if editor := get("Editor"); firstPair(editor)["full"] != akID || editor["canReveal"] != true {
 		t.Errorf("Editor 应拿到完整 AccessKey ID: %v", editor)
