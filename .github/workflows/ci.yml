@@ -47,7 +47,7 @@ jobs:
         run: npm run typecheck
 
       - name: Setup Go environment
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -83,7 +83,7 @@ jobs:
           cache: npm
 
       - name: Setup Go environment
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
