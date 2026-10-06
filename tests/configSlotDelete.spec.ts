@@ -30,12 +30,13 @@ test('删除 AK 插槽：确认后进入待删除态且不隐式刷新，保存�
   );
   const restore = async () => {
     const cur = await (await request.get(`/api/plugins/${PLUGIN}/resources/ecs/ak`)).json();
+    const fakes = (cur.pairs || []).filter((p: { slot: string }) => p.slot === slot || p.slot === keep);
+    if (fakes.length === 0) {
+      return; // 假插槽已全清（或从未写入），不动配置、避免无谓的插件重启
+    }
     const roster: Array<{ slot: string; label: string }> = (cur.pairs || [])
       .filter((p: { slot: string }) => p.slot !== slot && p.slot !== keep)
       .map((p: { slot: string; label: string }) => ({ slot: p.slot, label: p.label }));
-    if (roster.length === baseline.length) {
-      return; // 假插槽已全清（或从未写入），不动配置、避免无谓的插件重启
-    }
     const settings = await (await request.get(`/api/plugins/${PLUGIN}/settings`)).json();
     await request.post(`/api/plugins/${PLUGIN}/settings`, {
       data: {
