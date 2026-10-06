@@ -16,6 +16,8 @@ services:
       GF_LOG_LEVEL: info
       GF_FEATURE_TOGGLES_ENABLE: externalServiceAccounts
       GF_AUTH_MANAGED_SERVICE_ACCOUNTS_ENABLED: 'true'
+    dns:
+      - 223.5.5.5
     volumes:
       - ./dist:/var/lib/grafana/plugins/local-ecs-app
       - ./provisioning:/etc/grafana/provisioning

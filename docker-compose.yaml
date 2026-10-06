@@ -16,6 +16,10 @@ services:
       GF_SECURITY_SECRET_KEY: ${GF_SECURITY_SECRET_KEY:-}
       GF_LOG_LEVEL: info
       GF_LOG_FILTERS: plugin.local-ecs-app:debug
+    # Docker Desktop 内嵌 DNS 的默认上游（WSL2 宿主链）对阿里云 API 域名的并发解析
+    # 随机 SERVFAIL（server misbehaving），33 地域扇出几乎必挂；显式指到公网 DNS 根治
+    dns:
+      - 223.5.5.5
     volumes:
       - grafana-data:/var/lib/grafana
       - ./dist:/var/lib/grafana/plugins/local-ecs-app
