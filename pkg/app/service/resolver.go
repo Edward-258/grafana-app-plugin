@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -249,13 +250,13 @@ func (r *Resolver) Billings(creds []Credential) []BillingInfo {
 // Ensure 检查全部凭证可用：任何 AK 失败都进错误信息（点名 label），健康检查
 // 要的是"全部可用"，与 enrich 的独立降级语义不同。
 func (r *Resolver) Ensure(ctx context.Context, creds []Credential) error {
-	errs := make([]string, 0, len(creds))
+	errs := make([]string, len(creds)) // 按下标写，守 forEachLimited 的槽位隔离约定
 	forEachLimited(len(creds), maxFetchConcurrency, func(i int) {
 		if _, err := r.instances(ctx, creds[i], false); err != nil {
-			errs = append(errs, fmt.Sprintf("AK「%s」: %s", akName(creds[i]), err.Error()))
+			errs[i] = fmt.Sprintf("AK「%s」: %s", akName(creds[i]), err.Error())
 		}
 	})
-	if len(errs) > 0 {
+	if errs = slices.DeleteFunc(errs, func(s string) bool { return s == "" }); len(errs) > 0 {
 		return errors.New(strings.Join(errs, "；"))
 	}
 	return nil

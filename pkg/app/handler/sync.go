@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/config"
+
+	"local-ecs-app/pkg/app/service"
 )
 
 // 凭证自动同步：数据源实例设置独立于 app 插件设置存储，而 Secret 只能写不能
@@ -20,9 +23,14 @@ import (
 // datasources:write）代为搬运：从内存中的 DecryptedSecureJSONData 读出，经
 // Grafana 数据源 API 写入 ds 的 secureJsonData（两端加密存储，不经浏览器）。
 //
-// 多 AK：app 的全部插槽整体同步到 ds（键名 ak:<slot>:* 与 app 同 scheme），
-// jsonData.akList 携带 slot+label（非敏感值，红线4 允许）；被删除插槽的旧键
-// 空串覆盖清理；legacy 键在同步成功后清空，ds 侧不留第二录入源。
+// 多 AK：app 的全部插槽整体覆写到 ds（键名 ak:<slot>:* 与 app 同 scheme），
+// jsonData.akList 携带 slot+label（非敏感值，红线4 允许）；ds 现有的 ak:* 与
+// legacy 键先全部空串清掉再写入期望值，删除的插槽、旧格式键随之消失。
+//
+// 不做幂等跳过：ds 的 secureJsonFields 只暴露「是否已配置」，比不出插槽内换
+// AK；要比就得往 jsonData 放凭证指纹，违背红线4 的零敏感物料。代价是每次实例
+// 构造（启动/配置保存）多一次 ds 写入、ds 缓存冷一轮。app 设置是唯一真源，
+// 删光插槽同样同步（ds 清空，不留已删凭证继续跑告警）。
 //
 // iam 里为此新增的 datasources:write 是 Grafana 核心 action，不属于
 // %PLUGIN_ID%.* 生成器管辖（同 users.permissions:read 的既有先例）。
@@ -72,9 +80,10 @@ func (a *App) StartAlertingDatasourceSync(ctx context.Context, settings backend.
 }
 
 func (a *App) syncAlertingDatasource(ctx context.Context, appURL, token string, settings backend.AppInstanceSettings) error {
+	// 只有「一对都没有」继续往下走（清空 ds）；超限等其它错误不碰 ds
 	creds, err := credentialsFrom(backend.PluginContext{AppInstanceSettings: &settings})
-	if err != nil {
-		return fmt.Errorf("本 app 未配置凭证: %w", err)
+	if err != nil && !errors.Is(err, service.ErrNoSettings) {
+		return fmt.Errorf("读取本 app 凭证失败: %w", err)
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	appURL = strings.TrimRight(appURL, "/") // AppURL 带尾斜杠，直接拼接会产生 //api/... 404（同 auth.go JWksURL 先例）
@@ -131,101 +140,28 @@ func (a *App) syncAlertingDatasource(ctx context.Context, appURL, token string, 
 	}
 	secure, _ := cur["secureJsonFields"].(map[string]any)
 	jsonData, _ := cur["jsonData"].(map[string]any)
-
-	// 期望的 ds 侧插槽表：slot+label 整体替换
-	want := make([]AKSlot, 0, len(creds))
-	wantSlots := map[string]string{}
-	for _, c := range creds {
-		want = append(want, AKSlot{Slot: c.ID, Label: c.Label})
-		wantSlots[c.ID] = c.Label
-	}
-
-	// 幂等：ds akList 与期望一致、全部新键已配置、legacy 键已清空时跳过
-	//（每次启动都写会无谓地触发 ds 实例重建）；增删插槽/换 label/换 AK 则重同步。
-	if syncedAlready(secure, jsonData, want, wantSlots) {
-		return nil
-	}
-
 	if jsonData == nil {
 		jsonData = map[string]any{}
 	}
-	jsonData["akList"] = want
-	delete(jsonData, "alertingDsAKHash") // 旧单对幂等标记退役
 
 	sec := map[string]string{}
-	for _, c := range creds {
-		sec[SecureKeyID(c.ID)] = c.AccessKeyID
-		sec[SecureKeySecret(c.ID)] = c.AccessKeySecret
-	}
-	// 清理：已不在期望集里的 ak:* 键（删除的插槽）与 legacy 键，空串覆盖
 	for k := range secure {
-		if !strings.HasPrefix(k, "ak:") {
-			continue
-		}
-		slot, _, ok := parseSecureKey(k)
-		if ok && wantSlots[slot] == "" {
+		if strings.HasPrefix(k, "ak:") || k == "accessKeyId" || k == "accessKeySecret" {
 			sec[k] = ""
 		}
 	}
-	if secure["accessKeyId"] == true {
-		sec["accessKeyId"] = ""
+	want := make([]AKSlot, 0, len(creds))
+	for _, c := range creds {
+		want = append(want, AKSlot{Slot: c.ID, Label: c.Label})
+		sec[SecureKeyID(c.ID)] = c.AccessKeyID
+		sec[SecureKeySecret(c.ID)] = c.AccessKeySecret
 	}
-	if secure["accessKeySecret"] == true {
-		sec["accessKeySecret"] = ""
-	}
+	jsonData["akList"] = want
+	delete(jsonData, "alertingDsAKHash") // 旧单对幂等标记退役
+	cur["jsonData"] = jsonData
 	cur["secureJsonData"] = sec
 	if err := callJSON(http.MethodPut, "/api/datasources/uid/"+uid, cur, nil); err != nil {
 		return fmt.Errorf("更新数据源 %s 失败: %w", uid, err)
 	}
 	return nil
-}
-
-// syncedAlready 判断 ds 侧是否已是目标状态：akList 的 slot+label 全等、
-// 每个插槽的两把键都已在 secureJsonFields 标记配置、legacy 键不再在场。
-func syncedAlready(secure map[string]any, jsonData map[string]any, want []AKSlot, wantSlots map[string]string) bool {
-	if jsonData == nil {
-		return false
-	}
-	raw, _ := jsonData["akList"].([]any)
-	if len(raw) != len(want) {
-		return false
-	}
-	cur := map[string]string{}
-	for _, item := range raw {
-		m, ok := item.(map[string]any)
-		if !ok {
-			return false
-		}
-		slot, _ := m["slot"].(string)
-		label, _ := m["label"].(string)
-		if slot == "" {
-			return false
-		}
-		cur[slot] = label
-	}
-	if len(cur) != len(wantSlots) {
-		return false
-	}
-	for slot, label := range wantSlots {
-		if cur[slot] != label {
-			return false
-		}
-		if secure[SecureKeyID(slot)] != true || secure[SecureKeySecret(slot)] != true {
-			return false
-		}
-	}
-	return secure["accessKeyId"] != true && secure["accessKeySecret"] != true
-}
-
-// parseSecureKey 拆 ak:<slot>:<id|secret>。
-func parseSecureKey(k string) (slot, kind string, ok bool) {
-	rest, found := strings.CutPrefix(k, "ak:")
-	if !found {
-		return "", "", false
-	}
-	slot, kind, found = strings.Cut(rest, ":")
-	if !found || slot == "" || (kind != "id" && kind != "secret") {
-		return "", "", false
-	}
-	return slot, kind, true
 }
