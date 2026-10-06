@@ -294,7 +294,7 @@ export default function ConfigPage(_props: Props = {}) {
     const displayName = s.akConfigured && s.showFull && s.full ? s.full : s.masked || '未配置';
     if (s.removing) {
       return (
-        <div key={s.slot} className={`${styles.slotBox} ${styles.removing}`}>
+        <div key={s.slot} data-testid={`ak-slot-${s.slot}`} className={`${styles.slotBox} ${styles.removing}`}>
           <div className={styles.slotRow}>
             <span>将删除「{s.label || s.masked}」——保存后生效，告警数据源会同步清除该凭证。</span>
             <div className={styles.slotActions}>
@@ -307,7 +307,7 @@ export default function ConfigPage(_props: Props = {}) {
       );
     }
     return (
-      <div key={s.slot} className={styles.slotBox}>
+      <div key={s.slot} data-testid={`ak-slot-${s.slot}`} className={styles.slotBox}>
         <div className={styles.slotRow}>
           <Input
             width={20}
@@ -403,105 +403,109 @@ export default function ConfigPage(_props: Props = {}) {
   };
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        void onSave();
-      }}
-    >
-      <FieldSet label="Prometheus（对齐 Dashboard）">
-        <Field
-          label="Prometheus 数据源"
-          description="用已有监控数据告诉插件「这张 dashboard 是哪台机器」。scrape target 不必填 IP。"
-        >
-          <DataSourcePicker
-            type="prometheus"
-            noDefault
-            current={prometheusUid || null}
-            onChange={(ds) => setPrometheusUid(ds.uid)}
-            onClear={() => setPrometheusUid('')}
-            width={60}
-          />
-        </Field>
-        <Field
-          label="实例 label"
-          description="默认 instance。与 Node Exporter Full 上的 Instance 变量一致即可。"
-          className={styles.gap}
-        >
-          <Input
-            width={60}
-            value={instanceLabel}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setInstanceLabel(e.target.value)}
-          />
-        </Field>
-      </FieldSet>
+    <>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void onSave();
+        }}
+      >
+        <FieldSet label="Prometheus（对齐 Dashboard）">
+          <Field
+            label="Prometheus 数据源"
+            description="用已有监控数据告诉插件「这张 dashboard 是哪台机器」。scrape target 不必填 IP。"
+          >
+            <DataSourcePicker
+              type="prometheus"
+              noDefault
+              current={prometheusUid || null}
+              onChange={(ds) => setPrometheusUid(ds.uid)}
+              onClear={() => setPrometheusUid('')}
+              width={60}
+            />
+          </Field>
+          <Field
+            label="实例 label"
+            description="默认 instance。与 Node Exporter Full 上的 Instance 变量一致即可。"
+            className={styles.gap}
+          >
+            <Input
+              width={60}
+              value={instanceLabel}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setInstanceLabel(e.target.value)}
+            />
+          </Field>
+        </FieldSet>
 
-      <FieldSet label="阿里云 ECS（只读，查 ID 与规格）" className={styles.gap}>
-        <p className={styles.hint}>
-          每对 AK/SK 一个插槽，查找时并发扫全部账号；AK ID 加密存储，Viewer 仅见脱敏值，展开需要 Editor 及以上。
-        </p>
-        {slots.map(renderSlot)}
-        {canWrite && (
-          <div className={styles.slotRow}>
-            <Button
-              type="button"
-              variant="secondary"
-              icon="plus"
-              onClick={addSlot}
-              disabled={atLimit}
-              tooltip={atLimit ? `最多 ${MAX_AK_PAIRS} 对` : '新增一对 AK/SK 插槽'}
-            >
-              添加 AK/SK
-            </Button>
-            {atLimit && <span className={styles.muted}>已达 {MAX_AK_PAIRS} 对上限</span>}
-          </div>
-        )}
-        {hasLegacy && canWrite && (
-          <Alert title="旧格式凭证待迁移" severity="info">
-            这对凭证仍走旧格式键读取（一切照常工作）。在对应插槽补填 Secret 并保存后，即迁移到加密插槽存储。
-          </Alert>
-        )}
-        {canWrite && dsUid && !dsCredsReady && (
-          <Alert title="告警数据源凭证待同步" severity="info">
-            捆绑数据源「ECS 资产（告警）」尚未取得凭证，保存后插件后端会自动同步；若长期未生效请检查插件日志。
-          </Alert>
-        )}
-        {canWrite && !dsUid && (
-          <Alert title="告警数据源未实例化" severity="info">
-            捆绑数据源「ECS 资产（告警）」（{dsPluginType}）尚未创建，告警功能不可用。通常由 provisioning/datasources
-            自动预置，也可在「数据源 → 新建」手动选择本插件的数据源。
-          </Alert>
-        )}
-        {message && (
-          <Alert title="成功" severity="success">
-            {message}
-          </Alert>
-        )}
-        {error && (
-          <Alert title="失败" severity="error">
-            {error}
-          </Alert>
-        )}
-        {canWrite && (
-          <div className={styles.gap}>
-            <Button type="submit" disabled={saving || !allValid}>
-              保存
-            </Button>
-            {canReveal && (
+        <FieldSet label="阿里云 ECS（只读，查 ID 与规格）" className={styles.gap}>
+          <p className={styles.hint}>
+            每对 AK/SK 一个插槽，查找时并发扫全部账号；AK ID 加密存储，Viewer 仅见脱敏值，展开需要 Editor 及以上。
+          </p>
+          {slots.map(renderSlot)}
+          {canWrite && (
+            <div className={styles.slotRow}>
               <Button
                 type="button"
                 variant="secondary"
-                className={styles.btn}
-                onClick={() => void onTest()}
-                disabled={testing}
+                icon="plus"
+                onClick={addSlot}
+                disabled={atLimit}
+                tooltip={atLimit ? `最多 ${MAX_AK_PAIRS} 对` : '新增一对 AK/SK 插槽'}
               >
-                测试连接
+                添加 AK/SK
               </Button>
-            )}
-          </div>
-        )}
-      </FieldSet>
-
+              {atLimit && <span className={styles.muted}>已达 {MAX_AK_PAIRS} 对上限</span>}
+            </div>
+          )}
+          {hasLegacy && canWrite && (
+            <Alert title="旧格式凭证待迁移" severity="info">
+              这对凭证仍走旧格式键读取（一切照常工作）。在对应插槽补填 Secret 并保存后，即迁移到加密插槽存储。
+            </Alert>
+          )}
+          {canWrite && dsUid && !dsCredsReady && (
+            <Alert title="告警数据源凭证待同步" severity="info">
+              捆绑数据源「ECS 资产（告警）」尚未取得凭证，保存后插件后端会自动同步；若长期未生效请检查插件日志。
+            </Alert>
+          )}
+          {canWrite && !dsUid && (
+            <Alert title="告警数据源未实例化" severity="info">
+              捆绑数据源「ECS 资产（告警）」（{dsPluginType}）尚未创建，告警功能不可用。通常由 provisioning/datasources
+              自动预置，也可在「数据源 → 新建」手动选择本插件的数据源。
+            </Alert>
+          )}
+          {message && (
+            <Alert title="成功" severity="success">
+              {message}
+            </Alert>
+          )}
+          {error && (
+            <Alert title="失败" severity="error">
+              {error}
+            </Alert>
+          )}
+          {canWrite && (
+            <div className={styles.gap}>
+              <Button type="submit" disabled={saving || !allValid}>
+                保存
+              </Button>
+              {canReveal && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className={styles.btn}
+                  onClick={() => void onTest()}
+                  disabled={testing}
+                >
+                  测试连接
+                </Button>
+              )}
+            </div>
+          )}
+        </FieldSet>
+      </form>
+      {/* ConfirmModal 必须在 form 外：其确认按钮 type="submit"，嵌在 form 内会把
+        冒泡的 submit 变成 onSave——而 setSlots 异步，onSave 读到旧状态，
+        保存出等价配置后 reload，删除就"看起来没生效"（2026-10-06 实测踩坑）。 */}
       <ConfirmModal
         isOpen={confirmDelete !== null}
         title="删除该 AK/SK？"
@@ -514,7 +518,7 @@ export default function ConfigPage(_props: Props = {}) {
         }}
         onDismiss={() => setConfirmDelete(null)}
       />
-    </form>
+    </>
   );
 }
 

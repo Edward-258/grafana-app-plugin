@@ -164,6 +164,8 @@ docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允
 
 18. 多 AK 地域收束实验全链路通过（2026-10-06）：3 台实例 2+1 分布两地域（cn-heyuan 两台按量、cn-shanghai 一台包月），legacy 插槽沿用原 AK 改挂河源收束策略、新插槽放上海收束策略的新 RAM 用户 AK。实测五项全过：① `/ecs/test` → `ok:true`、两把各自 `count:2/regions:1` 与 `count:1/regions:1`；② enrich 双身份各自唯一命中自己账号的 AK（**可见集不相交 → 零跨 AK 歧义**，与两把 `"*"` AK 必歧义形成对照）；③ `billings[]` 两组同数字（同一云账号，符合预期）；④ 告警 assets 帧仅上海包月序列（按量被 14④c 设计排除），带 `ak`/`akLabel` 标签，`daysToExpire=8` 算术正确；⑤ account 帧两组×三字段、`metric` 标签区分、`billTotal=0` 与 enrich 的 0.07 差异是口径设计（account 只统计 PostPaid 实例级实付，产品费不挂实例）。ds 侧 sync 在重启后自动完成（新插槽凭证已到位，assets 序列可查即为证）。待做加分项：中途解除单把授权验证独立降级。
 
+19. 配置页删除 AK 插槽"点了没反应"（2026-10-06 实测修复）：**`@grafana/ui` ConfirmModal 的确认按钮硬编码 `type="submit"` 且组件自带内层 `<form>`，若弹窗嵌在页面 `<form>` 内，确认删除的 submit 会冒泡成外层表单提交**——`onSubmit → onSave()` 与 `setSlots(removing:true)` 同一事件内执行，React 状态异步导致 onSave 闭包读到旧状态，保存出等价配置后 `window.location.reload()`，表象即"点删除 → 整页刷新 → 什么都没变"（无数据损坏）。修复：ConfirmModal 移出 form（fragment 包裹）。回归固化为 `tests/configSlotDelete.spec.ts`：注入假插槽 → 确认删除后断言①待删除态可见且 window 标记存活（未刷新）②保存后插槽从页面与 `/ecs/ak` 双侧消失；finally 兜底恢复配置不污染真实实例。**顺带两个 Grafana API 硬知识**：更新插件设置是 `POST /api/plugins/:id/settings`（PUT 已 404，前端 `updatePlugin` 本地封装即 POST）；**body 必须带 `enabled:true`**——缺省会按 false 处理，撞上 `autoEnabled: true` 直接 400「Cannot disable auto-enabled plugin」。e2e 假插槽注入即走此 API（带 enabled/pinned + 现有 akList 全量回写）。
+
 ## 附录：历史实施计划（原 .zcode/plans/，按时间序）
 
 ### 计划一（2026-09-21，✅ 已完成）：ECS 租期信息采集——CreationTime / ExpiredTime / 计费方式全链路透出
