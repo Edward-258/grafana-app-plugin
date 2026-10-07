@@ -138,14 +138,15 @@ export default function ConfigPage(_props: Props = {}) {
         setSlots((akInfo.pairs || []).map(toSlot));
         if (canWrite) {
           // 凭证同步目标探测：数据源列表仅 Admin 可读（与配置页写入门槛一致）
-          const all =
-            await getBackendSrv().get<Array<{ uid: string; type: string; secureJsonFields?: Record<string, boolean> }>>(
-              '/api/datasources'
-            );
+          const all = await getBackendSrv().get<Array<{ uid: string; type: string }>>('/api/datasources');
           const ds = all.find((d) => d.type === dsPluginType);
           if (ds) {
             setDsUid(ds.uid);
-            const fields = ds.secureJsonFields || {};
+            // 列表接口不带 secureJsonFields，凭证是否到位只能查单个数据源
+            const detail = await getBackendSrv().get<{ secureJsonFields?: Record<string, boolean> }>(
+              `/api/datasources/uid/${ds.uid}`
+            );
+            const fields = detail.secureJsonFields || {};
             setDsCredsReady(Object.keys(fields).some((k) => k.startsWith('ak:')) || Boolean(fields.accessKeySecret));
           }
         }

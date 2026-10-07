@@ -9,10 +9,12 @@ import { expect, test } from './fixtures';
  * 注入两个假插槽、删除其一：CI 实例无真实 AK，若只注入一个，删除后 kept=0 会让
  * 保存按钮被 allValid 禁用（UI 不允许零插槽），用例必然卡死——两个保证 kept≥1。
  * 假 AK 值永不发起真实请求（删除链路只读写设置）；结束无论成败都把插槽表恢复
- * 原状，不污染实例上的真实配置。
+ * 原状，不污染实例上的真实配置。UI 保存会把陪跑插槽同步进告警数据源，restore
+ * 必须等 ds 侧也清干净才算恢复（否则 ds 健康检查残留 ERROR）。
  */
 
 const PLUGIN = 'local-ecs-app';
+const DS_UID = 'ecs-ds';
 const LABEL = 'e2e-删除回归';
 const LABEL_KEEP = 'e2e-删除回归-陪跑';
 
@@ -28,12 +30,27 @@ test('删除 AK 插槽：确认后进入待删除态且不隐式刷新，保存�
   const baseline: Array<{ slot: string; label: string }> = (akInfo.pairs || []).map(
     (p: { slot: string; label: string }) => ({ slot: p.slot, label: p.label })
   );
+  // sync 只在 app 实例重建时跑（ds 请求不会触发）：每轮先打一次 app 资源端点，再看 ds 侧假插槽键
+  const dsFakeKeys = async () => {
+    await request.get(`/api/plugins/${PLUGIN}/resources/ecs/ak`);
+    const res = await request.get(`/api/datasources/uid/${DS_UID}`);
+    if (!res.ok()) {
+      return ['<unreachable>'];
+    }
+    const fields: Record<string, boolean> = (await res.json()).secureJsonFields || {};
+    return Object.keys(fields).filter((k) => k.startsWith(`ak:${slot}:`) || k.startsWith(`ak:${keep}:`));
+  };
   const restore = async () => {
     const cur = await (await request.get(`/api/plugins/${PLUGIN}/resources/ecs/ak`)).json();
     const fakes = (cur.pairs || []).filter((p: { slot: string }) => p.slot === slot || p.slot === keep);
     if (fakes.length === 0) {
-      return; // 假插槽已全清（或从未写入），不动配置、避免无谓的插件重启
+      // 假插槽已全清（或从未写入），不动配置、避免无谓的插件重启；ds 侧仍要核对
+      await expect.poll(dsFakeKeys, { timeout: 30_000 }).toEqual([]);
+      return;
     }
+    // 设置的 Updated 时间戳是秒级精度：与 UI 保存同秒回写时 SDK 判定设置未变、不重建
+    // app 实例，sync 不跑，ds 残留陪跑插槽（2026-10-08 实测）——先隔开一秒
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
     const roster: Array<{ slot: string; label: string }> = (cur.pairs || [])
       .filter((p: { slot: string }) => p.slot !== slot && p.slot !== keep)
       .map((p: { slot: string; label: string }) => ({ slot: p.slot, label: p.label }));
@@ -51,6 +68,7 @@ test('删除 AK 插槽：确认后进入待删除态且不隐式刷新，保存�
         },
       },
     });
+    await expect.poll(dsFakeKeys, { timeout: 30_000 }).toEqual([]);
   };
 
   try {

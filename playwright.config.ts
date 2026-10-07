@@ -7,6 +7,9 @@
  * - 浏览器经 CDP 连容器（fixtures.ts 覆盖说明在 tests/fixtures.ts 头注），trace 关闭
  *   （CDP 连接下 tracing 不可用；失败截图与 error-context 仍有效）。
  * - viewer 项目跑 RBAC 拦截回归，指向 :3001 对照实例。
+ * - config-writes 项目放改写插件配置的用例（保存会让 app 实例重建、凭证同步进告警数据源），
+ *   依赖 chromium 项目跑完再跑，避免与只读用例并发时读到中间态（ds 健康检查撞上假 AK 等）。
+ *   单独调试这类用例时加 --no-deps 跳过前置项目。
  */
 
 import { defineConfig, devices } from '@playwright/test';
@@ -35,7 +38,16 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         browserBaseURL: process.env.GRAFANA_BROWSER_URL || 'http://172.17.0.1:3000',
       },
-      testIgnore: /rbac\.spec\.ts/,
+      testIgnore: [/rbac\.spec\.ts/, /configSlotDelete\.spec\.ts/],
+    },
+    {
+      name: 'config-writes',
+      testMatch: /configSlotDelete\.spec\.ts/,
+      dependencies: ['chromium'],
+      use: {
+        ...devices['Desktop Chrome'],
+        browserBaseURL: process.env.GRAFANA_BROWSER_URL || 'http://172.17.0.1:3000',
+      },
     },
     {
       name: 'viewer',

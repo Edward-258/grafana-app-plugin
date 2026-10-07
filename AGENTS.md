@@ -46,7 +46,7 @@ npm run lint                           # ESLint（@grafana/eslint-config）+ Pre
 golangci-lint run ./...                # 后端 lint（v2.13.2，配置 .golangci.yml；旧版二进制无法分析 go 1.26）
 go vet ./... && go test ./...          # 后端（含 zz_generated 守护测试 + pkg/ds 帧门禁/IP 守护测试）
 npx tsc --noEmit                       # 前端类型（含 tests/ 与 src/datasource/）
-npm run e2e                            # Playwright e2e（tests/，12 用例）：面板菜单扩展红线 + RBAC 拦截 + 页面导航 + 告警数据源
+npm run e2e                            # Playwright e2e（tests/，14 用例）：面板菜单扩展红线 + RBAC 拦截 + 页面导航 + 告警数据源
 docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允许未签名 local-ecs-app 与 local-ecs-app-ds）
 ```
 
@@ -167,6 +167,8 @@ docker compose up -d                   # Grafana 11.6 @ :3000（dev 模式，允
 19. 配置页删除 AK 插槽"点了没反应"（2026-10-06 实测修复）：**`@grafana/ui` ConfirmModal 的确认按钮硬编码 `type="submit"` 且组件自带内层 `<form>`，若弹窗嵌在页面 `<form>` 内，确认删除的 submit 会冒泡成外层表单提交**——`onSubmit → onSave()` 与 `setSlots(removing:true)` 同一事件内执行，React 状态异步导致 onSave 闭包读到旧状态，保存出等价配置后 `window.location.reload()`，表象即"点删除 → 整页刷新 → 什么都没变"（无数据损坏）。修复：ConfirmModal 移出 form（fragment 包裹）。回归固化为 `tests/configSlotDelete.spec.ts`：注入假插槽 → 确认删除后断言①待删除态可见且 window 标记存活（未刷新）②保存后插槽从页面与 `/ecs/ak` 双侧消失；finally 兜底恢复配置不污染真实实例。**顺带两个 Grafana API 硬知识**：更新插件设置是 `POST /api/plugins/:id/settings`（PUT 已 404，前端 `updatePlugin` 本地封装即 POST）；**body 必须带 `enabled:true`**——缺省会按 false 处理，撞上 `autoEnabled: true` 直接 400「Cannot disable auto-enabled plugin」。e2e 假插槽注入即走此 API（带 enabled/pinned + 现有 akList 全量回写）。
 
 20. 凭证同步两个漏洞 + Ensure 数据竞争（2026-10-07 评审发现并修复）：① **插槽内换 AK 不同步到 ds**——台账 15 的幂等判断只比 slot+label+「字段已配置」，配置页「替换」沿用原 slot uuid，于是判为已同步而跳过，告警继续用旧 AK（单对时代的 `alertingDsAKHash` 能识别换 AK，退役时丢了这层语义）；② **删光插槽 ds 留着最后一份凭证**——`credentialsFrom` 回 `ErrNoSettings` 时 sync 直接报错退出，从不清键。修法：**撤掉幂等跳过，每次实例构造整体覆写**（ds 现有 `ak:*`/legacy 键先全部空串清掉，再写入当前插槽；只有 `ErrNoSettings` 继续往下走把 ds 清空，超限等其它读错误不碰 ds），没选「往 jsonData 写凭证指纹」——那会违背红线 4 的零敏感物料。代价：每次启动/保存多一次 ds 写入，ds 缓存冷一轮。顺带修了 jsonData 为 nil 时新建的 map 没挂回 PUT 体的潜在丢 akList。`sync_test.go`（假 Grafana 数据源 API）覆盖换 AK、删光、超限三条，前两条对旧实现确认失败。③ `Resolver.Ensure` 在 `forEachLimited` 的并发回调里无锁 `append` 同一 slice——改为按下标写（守「fn(i) 只写 i」约定），CI 的 go test 加 `-race`（本机无 gcc 跑不了 race，CI runner 有）。
+
+21. 配置页「告警数据源凭证待同步」横幅恒误报（2026-10-08 修复）：**Grafana 的 `GET /api/datasources` 列表接口不带 `secureJsonFields`**，只有 `GET /api/datasources/uid/:uid` 详情才有——旧代码从列表读，凭证早已同步也恒判未就绪（README 配置页截图即带着这条假横幅）。修复 = 列表只取 uid、再查详情；回归 `tests/configDsSyncBanner.spec.ts` 以 Node 侧详情接口推导期望值双向断言（本机有凭证→横幅不出现、CI 无 AK→横幅出现），旧构建确认失败。**排查中挖出的同步盲区**：SDK 实例管理只凭设置的 `Updated` 时间戳判断是否重建 app 实例，而 grafana.db 里该时间戳是**秒级精度**——同一秒内两次保存，第二次不触发重建 → 不触发 sync，ds 停留在前一次的凭证。`configSlotDelete.spec.ts` 的 restore 正撞此坑（UI 保存与 API 回写同秒），跑完 e2e 后 ds 残留假插槽「e2e-删除回归-陪跑」、健康检查 ERROR、`datasource.spec.ts` 健康用例随之失败；人工修复 = 隔一秒以上原样再存一次设置并打一次 app 资源端点。用例修复：restore 回写前先隔 1.1s、回写后轮询「打 app 端点 + 查 ds 详情」直到假插槽键清空；并把该用例拆进独立的 `config-writes` 项目（`dependencies: ['chromium']`，只读用例全部跑完再跑——否则并发的 ds 健康用例会撞上同步进去的假 AK），单独调试加 `--no-deps`。README 配置页截图同步裁掉横幅区（只裁不改像素）。
 
 ## 附录：历史实施计划（原 .zcode/plans/，按时间序）
 
